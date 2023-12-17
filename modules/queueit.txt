@@ -279,16 +279,12 @@ class QUEUEIT():
             queueCookie = instance.scraper.session.cookies["Queue-it"]
             userId = queueCookie.split("u=")[1]
             origin = "https://" + response.url.split("/")[2]
-            print(response.text)
-            while True: time.sleep(1)
             doc = lxml.html.fromstring(response.content)
             
             customerId = doc.xpath("//script[@id='queueit-perftiming-script']")[0].attrib['data-queueit-c']
             eventId = doc.xpath("//script[@id='queueit-perftiming-script']")[0].attrib['data-queueit-tag-eventid']
             
             #target = response.history[0].url
-            print(response.text)
-            while True: time.sleep(1)
             target = response.text.split("targetUrl: decodeURIComponent('")[1].split("'")[0]
             if "softblock" in response.url:
                 instance.scraper.logger.warn("Softblock detected")
