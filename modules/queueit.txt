@@ -124,6 +124,9 @@ class QUEUEIT():
                     continue
     
     def notify(self, url):
+        self.titelbar("Task(s)")
+        self.titelbar("-Queue")
+        self.titelbar("Passed")
         manual_url = generateUrl(scraper=self.scraper, url=url, domain_name=self.url.split("//")[1].split("/")[0])
         webhook_private({
                 "Store":f"||{self.scraper.module}||",
@@ -931,6 +934,8 @@ class QUEUEIT():
                             time.sleep(getRetryDelay())
                             continue
                         instance.scraper.logger.success("Queue passed!")
+                        
+
                         return redirectUrl
                     else:
                         if firstTime:
