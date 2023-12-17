@@ -1,0 +1,873 @@
+import traceback
+from uuid import uuid4
+from collections import OrderedDict
+try: 
+    from ..functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+
+try:
+    from ..functions.settings import *
+except ImportError: 
+    from functions.settings import *
+
+try:
+    from ..functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from ..functions.monitor import *
+except ImportError: 
+    from functions.monitor import *
+try:
+    from ..functions.webhook import *
+except ImportError: 
+    from functions.webhook import *
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":True},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+MONITORTASKS = {}
+URL = ""
+apitasks = []
+
+class MMS():
+    def __init__(self,data):
+        global URL
+        try:
+            
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            self.profile_name = data["PROFILE"]
+            self.email = data["EMAIL"]
+            self.payment_method = str(data["PAYMENT_METHOD"]).strip().lower()
+            self.url = data["URL"]
+            self.first_name = data["FIRSTNAME"]
+            self.last_name = data["LASTNAME"]
+            self.address_1 = data["STREET_1"]
+            self.address_2 = data["STREET_2"]
+            self.zip_code = data["ZIPCODE"]
+            self.housenumber = data["HOUSENUMBER"]
+            self.city = data["CITY"]
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            self.country_iso = data["COUNTRY_ISO"]
+            self.pickup = True if "y" in data["Store Pickup"] else False
+            self.mode = "safe" if "safe" in str(data["MODE"]).strip().lower() else ""
+            self.use_account = False
+            try:
+                if str(data["ACCOUNT_PASSWORD"]).strip() != "":
+                    self.use_account = True
+                    self.password = data["ACCOUNT_PASSWORD"]
+                    self.email = data["ACCOUNT_EMAIL"]
+            except :
+                self.use_account = False
+
+            self.mode = "Normal"
+            self.use_safe= False
+            if "loop" in self.mode:
+                self.use_loop = True
+                self.mode = "Loop"
+            else:
+                self.use_loop = False
+            if "safe" in self.mode:
+                self.use_safe = True
+                self.mode = "Safe"
+            self.login = False
+            self.discordID = data["discordid"]
+            
+            if any(s == "" for s in [self.country,self.phone_number,self.city,self.housenumber,self.zip_code,self.address_1,self.last_name,self.first_name,self.email,self.url]):
+                print("Make sure everything needed is filled.")
+                sys.exit()
+            self.scraper = CREATE_SESSION(self.injection,mobile=True,proxys=proxies,module="MMS",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = self.scraper.user_agent
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            if str(self.url).strip().lower() == "api":
+                self.web_socket()
+            self.pid = self.url.split('-')[-1].split('.html')[0]
+            if "mediamarkt" in self.url:
+                self.titelbar = MODULETITEL({"store":"MediaMarkt","values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+                self.titelbar("Task(s)")
+                self.sales_line = "Media"
+                self.store = "MediaMarkt"
+            else:
+                self.titelbar = MODULETITEL({"store":"Saturn","values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+                self.titelbar("Task(s)")
+                self.sales_line = "Saturn"
+                self.store = "Saturn"
+            self.urlTLD = str(self.url).split(self.store.lower()+".")[1].split("/")[0]
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except Exception:
+                self.profile_webhook = ""
+            self.scraper.session.solve_on_post = True
+            self.scraper.set_proxy()
+                
+            self.scraper.logger.warn("Starting Task")
+            if self.use_account:
+                self.getlogin()
+                self.Login()
+            if self.use_safe:
+                self.getProduct()
+            self.atc()
+            self.scraper.set_proxy()
+            if self.pickup:
+                self.getStore()
+            self.get_checkout()
+            self.scraper.set_proxy()
+            self.sub_shipping()
+            self.scraper.set_proxy()
+            self.sub_payment()
+            self.checkout()
+            time.sleep(15)
+            sys.exit()
+        except Exception as e:
+            self.scraper.logger.error(f"Error: {traceback.format_exc()}")
+
+            self.titelbar("-Task(s)")
+            time.sleep(15)
+            sys.exit()
+
+    def injection(self, session : CREATE_SESSION, response :requests.Response):
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+
+
+    def web_socket(self):
+        global URL
+        apitasks.append(str(self.scraper.taskcount).replace("Task","").strip())
+        import websocket
+        from websocket import create_connection
+        self.scraper.logger.warn("Connected to API")
+        while True:
+            if int(self.scraper.taskcount) == int(min(apitasks)):
+                try:
+                    ws =  create_connection("wss://cosphix.herokuapp.com")
+                    message = ws.recv()
+                    if str(json.loads(message)["action"]).strip().lower() == "apisignal":
+                        if str(json.loads(message)["store"]).strip().lower() == "mms":
+                            self.url = str(json.loads(message)["url"]).strip()
+                            self.scraper.logger.success("Got restock Signal")
+                            URL = self.url
+                            ws.close()
+                            break
+                except websocket._exceptions.WebSocketConnectionClosedException:
+                    pass
+            else:
+                if URL != "":
+                    self.url = URL
+                    break
+    def getlogin(self):
+        self.scraper.session.headers = OrderedDict({
+            'authority': f'www.{self.store.lower()}.{self.urlTLD}',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'referer': f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout',
+            'sec-ch-ua': '"Not?A_Brand";v="8", "Chromium";v="108", "Google Chrome";v="108"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        })
+        self.scraper.logger.log("Getting Login Page")
+        while True:
+            response = self.scraper.get(f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/myaccount/auth/login')
+            if response:
+                self.scraper.logger.log("Got Login Page")
+                break
+    def Login(self):
+        self.scraper.logger.log("Logging in")
+        while True:
+            self.scraper.session.headers = OrderedDict({
+                "Host": f"www.{self.store.lower()}.{self.urlTLD}",
+                "content-type": "application/json",
+                "x-mms-salesline": self.sales_line,
+                "x-cacheable": "false",
+                "accept": "*/*",
+                "apollographql-client-version": "8.25.1",
+                "accept-language": "en-US,en;q=0.9",
+                "x-mms-country": self.urlTLD.upper(),
+                "x-flow-id": str(uuid4()),
+                "user-agent": "flutterapp - ios",
+                "referer": self.url,
+                "apollographql-client-name": "pwa-client",
+                "x-mms-language": self.urlTLD,
+                "x-operation": "LoginProfileUser"
+            })
+            response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql',data='{"operationName":"LoginProfileUser","variables":{"email":"'+self.email+'","password":"'+self.password+'"},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"a69b289ebfeaa066f2e5848252a5dd2d812c1f974de9cafbbad391e13c5ebab9"},"pwa":{"salesLine":"'+self.sales_line+'","country":"'+self.urlTLD.upper()+'","language":"'+self.urlTLD+'"}}}')
+            if response:
+                if "USERNAME_PASSWORD_INVALID" in response.text:
+                    self.scraper.logger.log("Username or Password invalid, exiting")
+                    self.titelbar("-Task(s)")
+                    sys.exit()
+                self.scraper.logger.log("Logged in")
+                break
+            
+                
+
+    def getProduct(self):
+        
+        monitor = MONITOR({
+            "store":self.store,
+            "product":self.pid,
+            "tasknumber":self.scraper.taskcount
+        })
+        
+        params = {
+            'operationName': 'GetSelectProduct',
+            'variables': json.dumps({
+                "hasMarketplace":True,
+                "isDemonstrationModelAvailabilityActive":False,
+                "withMarketingInfos":True,
+                "isFinancingDisplayActive":True,
+                "isArtificialScarcityActive":True,
+                "exp303isVariantPriceIncluded":False,
+                "isMpOfferV3Active":True,
+                "isMpOfferOldActive":False,
+                "locale":f"{self.urlTLD}-{self.urlTLD.upper()}",
+                "salesLine":self.sales_line,
+                "id":self.pid
+                }),
+            'extensions': json.dumps({
+                "persistedQuery":{
+                    "version":1,
+                    "sha256Hash":"4b4db26d133a38df28fbee035b8fdf5c502622b676a408a044cd948eb0a7abf6"
+                },
+                "pwa":{
+                    "salesLine":self.sales_line,
+                    "country":self.urlTLD.upper(),
+                    "language":self.urlTLD,
+                    "globalLoyaltyProgram":True,
+                    "isOneAccountProgramActive":True,
+                    "isMdpActive":True
+                }
+                }),
+        }
+
+        self.scraper.logger.log("Getting Product")
+        while True:
+            self.scraper.session.headers = OrderedDict({
+                "Host": f"www.{self.store.lower()}.{self.urlTLD}",
+                "content-type": "application/json",
+                "x-mms-salesline": self.sales_line,
+                "x-cacheable": "false",
+                "accept": "*/*",
+                "apollographql-client-version": "8.25.1",
+                "accept-language": "en-US,en;q=0.9", # Important for custom headers on cloudscraper
+                "x-mms-country": self.urlTLD.upper(),
+                "x-flow-id": str(uuid4()),
+                "user-agent": "flutterapp - ios",
+                "referer": f"https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/product/_apple-iphone-14-pro-128-gb-dunkellila-dual-sim-2832790.html",
+                "apollographql-client-name": "pwa-client",
+                "x-mms-language": self.urlTLD,
+                "x-operation": "GetSelectProduct"
+            })
+            self.scraper.set_proxy()
+            get = self.scraper.get(f"https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql",params=params)
+            if get:
+                try:
+                    if get.json()["data"]["productAggregate"]["availability"]["delivery"]["availabilityType"] == "IN_WAREHOUSE" or get.json()["data"]["productAggregate"]["availability"]["delivery"]["availabilityType"] != "NONE":
+                        self.scraper.logger.success("Got Product")
+                        monitor.instock()
+                        break
+                    else:
+                        if monitor.is_monitor():
+                            self.scraper.logger.error("Product OOS, retrying")
+                            time.sleep(getRetryDelay())
+                            continue
+                        else:
+                            self.scraper.logger.warn("Product OOS, switching to passiv Mode")
+                            while monitor.is_live() == False:
+                                time.sleep(3)
+                            continue
+                        
+                    
+                    
+                except Exception as e:
+                    self.scraper.logger.error(f"GetProduct: {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+
+
+    def atc(self):
+        self.scraper.logger.log("Adding to Cart")
+        while True:
+            try:
+                response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql', 
+                    json={
+                        'operationName': 'AddProduct',
+                        'variables': {
+                            'items': [
+                                {
+                                    'outletId': None,
+                                    'productId': self.pid,
+                                    'quantity': 1,
+                                    'serviceIds': [],
+                                    'warrantyIds': [],
+                                },
+                            ],
+                        },
+                        'extensions': {
+                            'persistedQuery': {
+                                'version': 1,
+                                'sha256Hash': 'b4feac3492aa92a2d196c4a0a89b2df26747f9775cf719ad968a6d05c69571b7',
+                            },
+                            'pwa': {
+                                'salesLine': self.sales_line,
+                                'country': self.urlTLD.upper(),
+                                'language': self.urlTLD,
+                                'globalLoyaltyProgram': True,
+                                'isOneAccountProgramActive': True,
+                                'isMdpActive': True,
+                            },
+                        },
+                    },headers={
+                            'Host': f"www.{self.store.lower()}.de",
+                            'x-operation': 'AddProduct',
+                            'apollographql-client-name': 'pwa-client',
+                            'x-cacheable': 'false',
+                            'user-agent': 'flutterapp - ios',
+                            'x-mms-salesline': self.sales_line,
+                            'content-type': 'application/json',
+                            'accept': '*/*',
+                            'x-flow-id': str(uuid4()),
+                            'x-mms-country': self.urlTLD.upper(),
+                            'apollographql-client-version': '8.25.1',
+                            'x-mms-language': self.urlTLD,
+                            'referer': self.url,
+                            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        })
+                if response:
+                    try:
+                        self.basketid = response.json()['data']['addProduct']['id']
+                        break
+                    except Exception:
+                        self.scraper.logger.error(f"AddToCart : Error getting BasektID")
+                        time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error(f"AddToCart : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.titelbar("carts")
+        self.scraper.logger.success("Added to Cart")
+    
+
+    def getStore(self):
+        self.scraper.logger.log("Getting nearest Store")
+        while True:
+            try:
+                response = self.scraper.get(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql', params={
+                    'operationName': 'GetClosestStoresByZipCodeOrCity',
+                    'variables': json.dumps({
+                        "limit":15,
+                        "withDeliveryTimeIndicator":False,
+                        "withDeliveryPromise":True,
+                        "isDemonstrationModelAvailabilityActive":False,
+                        "salesLine":self.sales_line,
+                        "zipCodeOrCity":self.zip_code,
+                        "productId":self.pid
+                        }),
+                    'extensions': json.dumps({
+                        "persistedQuery":{
+                            "version":1,
+                            "sha256Hash":"062940c69f789d554ff5b13c0ee55c76d5bfd11dcd6021708ca4b0dd3de54537"
+                        },
+                        "pwa":{
+                            "salesLine":self.sales_line,
+                            "country":self.urlTLD.upper(),
+                            "language":self.urlTLD,
+                            "globalLoyaltyProgram":True,
+                            "isOneAccountProgramActive":True,
+                            "isMdpActive":True
+                        }
+                        }),
+                },headers={
+                    'authority': f'https://www.{self.store.lower()}.{self.urlTLD}',
+                    'accept': '*/*',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'apollographql-client-name': 'pwa-client',
+                    'apollographql-client-version': '8.25.1',
+                    'content-type': 'application/json',
+                    'referer': f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout',
+                    'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'sec-fetch-dest': 'empty',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-site': 'same-origin',
+                    'user-agent': 'flutterapp - ios',
+                    'x-cacheable': 'false',
+                    'x-flow-id': str(uuid4()),
+                    'x-mms-country': self.urlTLD.upper(),
+                    'x-mms-language': self.urlTLD,
+                    'x-mms-salesline': self.sales_line,
+                    'x-operation': 'GetClosestStoresByZipCodeOrCity',
+                })
+                self.storeID = None
+                if response:
+                    for store in response.json()["data"]["closestStores"]:
+                        if store["deliveryPromise"] != None:
+                            self.storeID = store["id"]
+                            break
+                
+                if self.storeID:
+                    self.scraper.logger.log("Got nearest Store")
+                    break
+                self.scraper.logger.magenta("Item not availalbe / No Store available")
+                time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error(f"GetStore : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetStore: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+
+    def get_checkout(self):
+        
+        self.scraper.logger.log("Getting Checkout")
+        while True:
+            try:
+                response = self.scraper.get(f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout/address',headers={
+                    'Host': f'www.{self.store.lower()}.{self.urlTLD}',
+                    'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'upgrade-insecure-requests': '1',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'sec-fetch-site': 'none',
+                    'sec-fetch-mode': 'navigate',
+                    'sec-fetch-user': '?1',
+                    'sec-fetch-dest': 'document',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                })
+                if response:
+                    break
+            except Exception as e:
+                self.scraper.logger.error(f"GetChekout : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetChekout: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Got Checkout")
+
+    def sub_shipping(self):
+        if self.pickup:
+            self.scraper.logger.log("Submitting Store")
+            while True:
+                try:
+                    response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql',headers={
+                        'authority': f'www.{self.store.lower()}.{self.urlTLD}',
+                        'accept': '*/*',
+                        'accept-language': 'de-DE,de;q=0.9',
+                        'apollographql-client-name': 'pwa-client',
+                        'apollographql-client-version': '8.25.1',
+                        'content-type': 'application/json',
+                        'origin': f'https://www.{self.store.lower()}.{self.urlTLD}',
+                        'referer': f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout/address',
+                        'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-platform': '"Windows"',
+                        'sec-fetch-dest': 'empty',
+                        'sec-fetch-mode': 'cors',
+                        'sec-fetch-site': 'same-origin',
+                        'user-agent': 'flutterapp - ios',
+                        'x-cacheable': 'false',
+                        'x-flow-id': str(uuid4()),
+                        'x-mms-country': self.urlTLD.upper(),
+                        'x-mms-language': self.urlTLD,
+                        'x-mms-salesline': self.sales_line,
+                        'x-operation': 'SetFulfillmentDetailsMdp',
+                    }, json={
+                        'operationName': 'SetFulfillmentDetailsMdp',
+                        'variables': {
+                            'basketId': self.basketid,
+                            'shouldUpdateLoyaltyPoints': False,
+                            'outletId': self.storeID,
+                            'pickupLocation': 'COUNTER',
+                        },
+                        'extensions': {
+                            'persistedQuery': {
+                                'version': 1,
+                                'sha256Hash': '45f51cae922e2fa7be42145eb7bdf5248eae7ce2a857291f7068198b019e765b',
+                            },
+                            'pwa': {
+                                'salesLine': self.sales_line,
+                                'country': self.urlTLD.upper(),
+                                'language': self.urlTLD,
+                                'globalLoyaltyProgram': True,
+                                'isOneAccountProgramActive': True,
+                                'isMdpActive': True,
+                            },
+                        },
+                    })
+                    if response:
+                        if response.json()["data"]["basket"]["id"]:
+                            self.scraper.logger.log("Submitted Store")
+                            break
+                except:
+                    self.scraper.logger.error(f"SubStore : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubStore: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+        self.scraper.logger.log("Submitting Shipping")
+        json_data={
+            'operationName': 'SetAddress',
+            'variables': {
+                'basketId': self.basketid,
+                'billing': {
+                    'additionalInfo': None,
+                    'country': self.urlTLD.upper(),
+                    'firstname': self.first_name,
+                    'lastname': self.last_name,
+                    'city': self.city,
+                    'zipcode': self.zip_code,
+                    'salutation': 'MR',
+                    'houseNumber': self.housenumber,
+                    'street': self.address_1
+                },
+                'shipping': {
+                    'additionalInfo': None,
+                    'country': self.urlTLD.upper(),
+                    'firstname': self.first_name,
+                    'lastname': self.last_name,
+                    'city': self.city,
+                    'zipcode': self.zip_code,
+                    'salutation': 'MR',
+                    'houseNumber': self.housenumber,
+                    'street': self.address_1
+                },
+                'customer': {
+                    'birthdate': None,
+                    'businessRelationship': 'B2C',
+                    'certifiedEmail': None,
+                    'cidInvoice': None,
+                    'companyName': None,
+                    'companyTaxId': None,
+                    'customerTaxId': None,
+                    'email': self.email,
+                    'loyaltyCardId': None,
+                    'phoneNumber': None,
+                },
+            },
+            'extensions': {
+                'persistedQuery': {
+                    'version': 1,
+                    'sha256Hash': 'adbaea836039eb71fda4bce14c85841b3a1abc73c2eceaa1e8ffc334c3cc029e',
+                },
+                'pwa': {
+                    'salesLine': self.sales_line,
+                    'country': self.urlTLD.upper(),
+                    'language': self.urlTLD,
+                    'globalLoyaltyEnrollment': True,
+                    'globalLoyaltyProgram': True,
+                    'fifaUserCreation': True,
+                },
+            },
+        }
+        if self.pickup:
+            json_data["extensions"]["pwa"] = {
+                'salesLine': self.sales_line,
+                'country': self.urlTLD.upper(),
+                'language': self.urlTLD,
+                'globalLoyaltyProgram': True,
+                'isOneAccountProgramActive': True,
+                'isMdpActive': True,
+            }
+        if self.login == True:
+            del json_data["variables"]["customer"]
+            json_data["extensions"]["pwa"]["ccr"] = True
+            json_data["extensions"]["persistedQuery"]["sha256Hash"] = "335d3817764ba874d3acf5dc02b33e1eb9f1a2b46f1bb0a0825d2c0a54999cb0"
+        while True:
+            try:
+                response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql',json=json_data,headers={
+                            'Host': f"www.{self.store.lower()}.{self.urlTLD}",
+                            'x-operation': 'SetAddress',
+                            'apollographql-client-name': 'pwa-client',
+                            'x-cacheable': 'false',
+                            'user-agent': 'flutterapp - ios',
+                            'x-mms-salesline': self.sales_line,
+                            'content-type': 'application/json',
+                            'accept': '*/*',
+                            'x-flow-id': str(uuid4()),
+                            'x-mms-country': self.urlTLD.upper(),
+                            'apollographql-client-version': '8.25.1',
+                            'x-mms-language': self.urlTLD,
+                            'referer': self.url,
+                            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        })
+                if response:
+                    try:
+                        self.earliest = response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['fulfillments'][0]['promise']['earliest']
+                        self.latest =  response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['fulfillments'][0]['promise']['latest']
+                        self.price = f"{response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['itemPrice']['price']} €"
+                        if str(self.pid).strip() == "":
+                            self.pid = response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['productId']
+                        self.name = response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['fallbackTitle']
+                        try:
+                            self.pic = response.json()['data']['basket']['content']['checkout']['mms']['lineItems'][0]['product']['titleImageId']
+                            self.pic = f"https://assets.mmsrg.com/isr/166325/c1/-/{self.pic}/fee_325_225_png"
+                        except Exception:
+                            self.pic = ""
+                    except Exception:
+                        self.earliest = ""
+                        self.latest = ""
+                    
+                    break
+
+            except Exception as e:
+                self.scraper.logger.error(f"SubmittingShipping : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingShipping: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Submitted Shipping")
+        response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql',json={
+            'operationName': 'UpdateSelectedPayment',
+            'variables': {
+                'basketId': self.basketid,
+            },
+            'extensions': {
+                'persistedQuery': {
+                    'version': 1,
+                    'sha256Hash': 'c0709a245d39a0448cbbc05bd9a786d3ab0e490be1e530c9760f887bbf845e3d',
+                },
+                'pwa': {
+                    'salesLine': self.sales_line,
+                    'country': self.urlTLD.upper(),
+                    'language': self.urlTLD,
+                    'globalLoyaltyProgram': True,
+                    'isOneAccountProgramActive': True,
+                    'isMdpActive': True,
+                },
+            },
+        },headers={
+            'Host': f"www.{self.store.lower()}.{self.urlTLD}",
+            'x-operation': 'UpdateSelectedPayment',
+            'apollographql-client-name': 'pwa-client',
+            'x-cacheable': 'false',
+            'user-agent': 'flutterapp - ios',
+            'x-mms-salesline': self.sales_line,
+            'content-type': 'application/json',
+            'accept': '*/*',
+            'x-flow-id': str(uuid4()),
+            'x-mms-country': self.urlTLD.upper(),
+            'apollographql-client-version': '8.25.1',
+            'x-mms-language': self.urlTLD,
+            'referer': self.url,
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        })
+    def sub_payment(self):
+        json_data = {
+            'operationName': 'AddPayment',
+            'variables': {
+                'basketId': self.basketid,
+                'method': 'PAYPAL',
+                'removeId': None,
+                'extra': None,
+            },
+            'extensions': {
+                'persistedQuery': {
+                    'version': 1,
+                    'sha256Hash': '00ac2314d75070828213ce56df1e3e0e9ebf0c1417768333200a96426aa8a26f',
+                },
+                'pwa': {
+                    'salesLine': self.sales_line,
+                    'country': self.urlTLD.upper(),
+                    'language': self.urlTLD,
+                    'globalLoyaltyProgram': True,
+                    'isOneAccountProgramActive': True,
+                    'isMdpActive': True,
+                },
+            },
+        }
+        
+        if str(self.payment_method).strip().lower() == "creditcard" or str(self.payment_method).strip().lower() == "manual" or str(self.payment_method).strip().lower() == "cc":
+            json_data["variables"]["method"] = "CRECA"
+            self.payment_method = "CreditCard"
+        elif str(self.payment_method).strip().lower() == "store" or str(self.payment_method).strip().lower() == "instore":
+            json_data["variables"]["method"] = "COP"
+            self.payment_method = "Instore"
+        else:
+            self.payment_method = "PayPal"
+        self.scraper.logger.log("Submitting Payment")
+        while True:
+            try:
+                response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql', json=json_data,headers={
+                            'Host': f"www.{self.store.lower()}.{self.urlTLD}",
+                            'x-operation': 'AddPayment',
+                            'apollographql-client-name': 'pwa-client',
+                            'x-cacheable': 'false',
+                            'user-agent': 'flutterapp - ios',
+                            'x-mms-salesline': self.sales_line,
+                            'content-type': 'application/json',
+                            'accept': '*/*',
+                            'x-flow-id': str(uuid4()),
+                            'x-mms-country': self.urlTLD.upper(),
+                            'apollographql-client-version': '8.25.1',
+                            'x-mms-language': self.urlTLD,
+                            'referer': self.url,
+                            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        })
+                if response:
+                    try:
+                        self.basketid = response.json()['data']['basket']['id']
+                        break
+                    except Exception:
+                        self.scraper.logger.error(f"SubmittingPayment : Error getting BasektID")
+                        time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error(f"SubmittingPayment : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingPayment: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Submitted Payment")
+    
+    def checkout(self):
+        """for cookie in self.scraper.session.cookies:
+            if cookie.domain.strip() == "":
+                cookie.domain = '.mediamarkt.de'"""
+        self.scraper.logger.log("Submitting Checkout")
+        loopcount = 1
+        while True:
+            self.scraper.set_proxy()
+            try:
+                response = self.scraper.post(f'https://www.{self.store.lower()}.{self.urlTLD}/api/v1/graphql', json={
+                    'operationName': 'Finalize',
+                    'variables': {
+                        'basketId': self.basketid,
+                        'deliveryPromise': {
+                            'displayText': 'Lieferung bis Donnerstag, 23.11.2023' if self.pickup == False else 'Marktabholung ab Donnerstag, 23.11.2023',
+                        },
+                        'groupsDeliveryPromise': [
+                            {
+                                'displayText': 'Lieferung bis Donnerstag, 23.11.2023' if self.pickup == False else 'Marktabholung ab Donnerstag, 23.11.2023',
+                                'id': self.pid,
+                            },
+                        ],
+                        'failureUrl': f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout/payment-failure-callback?id={self.basketid}',
+                        'successUrl': f'https://www.{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout/payment-success-callback?id={self.basketid}',
+                    },
+                    'extensions': {
+                        'persistedQuery': {
+                            'version': 1,
+                            'sha256Hash': 'a8649a05d50a1f2a1a84da34e0dc9be7003d470dac45f48bc8a6a0108bf4761c',
+                        },
+                        'pwa': {
+                            'salesLine':self.sales_line,
+                            'country': self.urlTLD.upper(),
+                            'language': self.urlTLD,
+                            'globalLoyaltyProgram': True,
+                            'isOneAccountProgramActive': True,
+                            'isMdpActive': True,
+                        },
+                    },
+                },headers={
+                            'Host': f"www.{self.store.lower()}.{self.urlTLD}",
+                            'x-operation': 'Finalize',
+                            'apollographql-client-name': 'pwa-client',
+                            'x-cacheable': 'false',
+                            'user-agent': 'flutterapp - ios',
+                            'x-mms-salesline': self.sales_line,
+                            'content-type': 'application/json',
+                            'accept': '*/*',
+                            'x-flow-id': str(uuid4()),
+                            'x-mms-country': self.urlTLD.upper(),
+                            'apollographql-client-version': '8.25.1',
+                            'x-mms-language': self.urlTLD,
+                            'referer': self.url,
+                            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        })
+                
+                if response:
+                    try:
+                        if str(self.payment_method).strip().lower() == "store" or str(self.payment_method).strip().lower() == "instore":
+                            response.json()['data']['finalize']['basket']['content']['checkout']['mmsGroups']['groups'][0]['lineItems'][0]['orderNumber']
+                            paymentlink = f'{self.store.lower()}.{self.urlTLD}/{self.urlTLD}/checkout/thank-you?id={self.basketid}'
+                        if str(self.payment_method).strip().lower() == "creditcard" or str(self.payment_method).strip().lower() == "manual" or str(self.payment_method).strip().lower() == "cc":
+                            paymentlink = response.json()['data']['finalize']['paymentAction']['target'] + "?"+response.json()['data']['finalize']['paymentAction']['payload']
+                        else:
+                            paymentlink = response.json()['data']['finalize']['paymentAction']['target']
+                        break
+                    except Exception as e:
+                        print(response.text)
+                        input()
+                        self.scraper.logger.error(f"SubmittingCheckout: Error getting CheckoutData",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingPayment: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error(f"SubmittingCheckout: {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingCheckout: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        
+        if self.use_loop == False or str(self.payment_method).strip().lower() != "store" or str(self.payment_method).strip().lower() != "instore":
+            self.titelbar("success")
+            self.titelbar("-carts")
+            webhook_public({
+                "Store":f"||{self.store} {self.urlTLD.upper()}||",
+                "Product":f"{self.name}",
+                "Price":f"{self.price}",
+                "Payment Method":"CreditCard" if str(self.payment_method).strip().lower() == "cc" or str(self.payment_method).strip().lower() == "creditcard" else "PayPal",
+                "Mode":self.mode,
+                "Store Pickup":f"||{self.pickup}||",
+                "Task Input": self.url}
+                ,img=self.pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=mms&url={self.url})")
+            webhook_private({
+                "Store":f"||{self.store} {self.urlTLD.upper()}||",
+                "Product":f"{self.name}",
+                "Price":f"{self.price}",
+                "Payment Method":"CreditCard" if str(self.payment_method).strip().lower() == "cc" or str(self.payment_method).strip().lower() == "creditcard" else "PayPal",
+                "Mode":self.mode,
+                "Store Pickup":f"||{self.pickup}||",
+                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                "discordid":self.discordID
+                },img=self.pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,paymentlink),product_url=self.url)
+            self.scraper.logger.success("Submitted Checkout")
+        else:
+            self.titelbar("-carts")
+        if str(self.payment_method).strip().lower() == "store" or str(self.payment_method).strip().lower() == "instore":
+            self.titelbar("success")
+            self.titelbar("-carts")
+            webhook_public({
+                "Store":f"||{self.store} {self.urlTLD.upper()}||",
+                "Product":f"{self.name}",
+                "Price":f"{self.price}",
+                "Payment Method":"Instore",
+                "Mode":self.mode,
+                "Store Pickup":f"||{self.pickup}||",
+                "Task Input": self.url}
+                ,img=self.pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=mms&url={self.url})")
+            webhook_private({
+                "Store":f"||{self.store} {self.urlTLD.upper()}||",
+                "Product":f"{self.name}",
+                "Price":f"{self.price}",
+                "Payment Method":"Instore",
+                "Mode":self.mode,
+                "Store Pickup":f"||{self.pickup}||",
+                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                "discordid":self.discordID
+                },img=self.pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,paymentlink),product_url=self.url)
+            self.scraper.logger.success("Submitted Checkout")
+        sys.exit()

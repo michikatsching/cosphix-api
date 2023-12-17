@@ -1,0 +1,435 @@
+import traceback,time
+from random import randint
+import lxml.html
+from uuid import uuid4
+try:
+    from src.functions.create_session import *
+except ImportError: 
+    from src.functions.create_session import *
+
+
+try:
+    from src.functions.settings import *
+except ImportError: 
+    from functions.settings import *
+try:
+    from src.functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+
+
+
+
+URL = ""
+apitasks = []
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":True},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict / Product OOS","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+
+
+
+class OTTO():
+    def __init__(self,data):
+        global URL
+        try:
+            self.titelbar = MODULETITEL({"store":"Otto","values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.url = data["URL"]
+            self.payment_method = str(data["PAYMENT_METHOD"]).strip().lower()
+            self.profile_name = data["PROFILE"]
+            self.email = data["ACCOUNT_EMAIL"]
+            self.password = data["ACCOUNT_PASSWORD"]
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            self.discordID = data["discordid"]
+            
+            if any(s == "" for s in [self.url,self.payment_method,self.profile_name,self.email,self.password]):
+                print("Make sure everything needed is filled.")
+                sys.exit()
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except Exception:
+                self.profile_webhook = ""
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module="OTTO",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = self.scraper.user_agent
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            self.scraper.solve_on_post = True
+            if str(self.url).strip().lower() == "api":
+                self.web_socket()
+            self.scraper.set_proxy()
+            self.scraper.logger.warn("Starting Task")
+            self.login()
+            self.getpage()
+            self.atc()
+            self.getcheckout()
+            if "Auf Rechnung" not in self.payment_method_set and self.payment_method == "invoice":
+                self.set_payment()
+            self.checkout()
+            time.sleep(15)
+            sys.exit()
+        except Exception as e:
+            print(f"Profile error - {e}")
+            self.titelbar("-Task(s)")
+            time.sleep(15)
+            sys.exit()
+            
+
+    def injection(self, session : CREATE_SESSION, response :requests.Response):
+        
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+
+
+    def web_socket(self):
+        global URL
+        apitasks.append(str(self.tasknumber).strip())
+        import websocket
+        from websocket import create_connection
+        self.scraper.logger.warn("Connected to API")
+        while True:
+            if int(self.tasknumber) == int(min(apitasks)):
+                try:
+                    ws =  create_connection("wss://hypeaio.herokuapp.com/")
+                    message = ws.recv()
+                    if str(json.loads(message)["action"]).strip().lower() == "apisignal":
+                        if str(json.loads(message)["store"]).strip().lower() == str(self.scraper.module).strip().lower():
+                            self.url = str(json.loads(message)["url"]).strip()
+                            self.scraper.logger.success("Got restock Signal")
+                            URL = self.url
+                            ws.close()
+                            break
+                except websocket._exceptions.WebSocketConnectionClosedException:
+                    pass
+            else:
+                if URL != "":
+                    self.url = URL
+                    break
+
+        
+
+
+    def login(self):
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?1',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            response = self.scraper.get('https://www.otto.de/customer-identity/login', headers=headers)
+            if response:
+                try:
+                    csrf = lxml.html.fromstring(response.content).xpath("//input[@name='_csrf']")[0].attrib['value']
+                    challangeValue = response.text.split('data-qa="fti-login-challenge-value"')[1].split('data-value="')[1].split('"')[0]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"GetLogin : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetLogin: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+        
+        self.scraper.logger.log("Logging in")
+        while True:
+            try:
+                response = self.scraper.post('https://www.otto.de/customer-identity/login',data={
+                    '_csrf': csrf,
+                    'email': self.email,
+                    'password': self.password,
+                    'challengeValue': challangeValue,
+                },params={
+                    'cache': randint(0, 9999)
+                }, headers=headers)
+                if response:
+                    if response.url == "https://www.otto.de/myaccount/dashboard" or "myaccount/dashboard" in response.url:
+                        break
+                    else:
+                        self.scraper.logger.error(f"Login: Wrong Email/Password")
+                        sys.exit()
+
+            except Exception as e:
+                self.scraper.logger.error(f"Login : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | Login: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Logged in")
+    def getpage(self):
+        self.scraper.logger.log("Getting Product")
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'referer': 'https://www.otto.de/order/basket',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-arch': '"x86"',
+            'sec-ch-ua-bitness': '"64"',
+            'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.109", "Google Chrome";v="120.0.6099.109"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-model': '""',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"15.0.0"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
+        while True:
+            try:
+                response = self.scraper.get(self.url,params={
+                    'cache': randint(0, 9999)
+                },headers=headers)
+                if response:
+                    
+                    try:
+                        doc = lxml.html.fromstring(response.content)
+                        try:
+                            self.variation_id = self.url.split("/#variationId=")[1]
+                        except Exception as e:
+                            self.variation_id = doc.xpath("//div[@data-qa='articleNr']")[0].attrib['data-variation-id']
+                        self.product_id = self.url.split("-")[-1].split("/")[0]
+                        try:
+                            self.product_price = doc.xpath("//span[@class='js_pdp_price__retail-price__value pl_headline300']")[0].text_content()
+                            self.product_picture = doc.xpath("//meta[@name='twitter:image']")[0].attrib['content']
+                        except Exception as e:
+                            self.product_price = "???"
+                            self.product_picture = "???"
+                        break
+                    except Exception as e:
+                        self.scraper.logger.error(f"GetProduct : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error(f"GetProduct : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Got Product")
+    
+    def atc(self):
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': '*/*',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/json; charset=UTF-8',
+            'origin': 'https://www.otto.de',
+            'referer': self.url,
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform':self.ua_platform,
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': self.user_agent,
+            'x-requested-with': 'XMLHttpRequest',
+        }
+        
+        self.scraper.logger.log("Adding to Cart")
+        
+        while True:
+            try:
+                response = self.scraper.post(f'https://www.otto.de/order/addToBasket',json={
+                    'variationId': self.variation_id,
+                    'quantity': '1',
+                    'itemOrigin': 'ads',
+                    'services': [],
+                    'tracking': {},
+                },params={
+                    'cache': randint(0, 9999)
+                }, headers=headers)
+                if response:
+                    self.product_name = response.json()["itemName"]
+                    break
+            except Exception as e:
+                self.scraper.logger.error(f"AddToCart : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | AddToCart: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.titelbar("carts")
+        self.scraper.logger.success("Added to Cart")
+
+    def getcheckout(self):
+        headers = {
+                "accept": "*/*",
+                "accept-encoding": "gzip, deflate, br",
+                "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                "user-agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36',
+                "x-requested-with": "XMLHttpRequest"
+            }
+        self.scraper.logger.log("Getting Checkout")
+        while True:
+            try:
+                response = self.scraper.get('https://www.otto.de/order/checkout',headers=headers)
+                if response:
+                    if "reauthenticate" in response.url:
+                        self.login()
+                        continue
+                    try:
+                        doc = lxml.html.fromstring(response.content)
+                        
+                        try:
+                            self.basket_hash = doc.xpath("//button[@class='p_btn150--1st order_js_checkout_button']")[0].attrib['data-baskethash']
+                        except:
+                            self.basket_hash = response.text.split('data-basketHash="')[1].split('"')[0]
+                        self.checkoutHash = response.text.split('data-checkoutHash="')[1].split('"')[0]
+                        self.payment_method_set  = doc.xpath("//dl[@class='or_sidebar__payment__text']")[0]
+                        break
+                    except Exception:
+                        if self.product_id in response.text and "Bestellvorgang" not in response.text:
+                            self.scraper.logger.error(f"Error getting Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckout: {response.text}")
+                            time.sleep(getRetryDelay())
+                            continue
+                        else:
+                            self.scraper.logger.error(f"GetCheckout : Cart cleared")
+                            self.titelbar("-carts")
+                            time.sleep(getRetryDelay())
+                            self.getpage()
+                            self.atc()
+            except Exception as e:
+                self.scraper.logger.error(f"GetCheckout : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckout: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Got Checkout")
+    
+    def set_payment(self):
+        headers = {
+                "accept": "*/*",
+                "accept-encoding": "gzip, deflate, br",
+                "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                "user-agent": self.user_agent,
+                "x-requested-with": "XMLHttpRequest"
+            }
+        self.scraper.logger.log("Submitting Payment")
+        if str(self.payment_method).strip().lower() != "prepaid":
+            self.payment_method = "Prepaid"
+            data = {
+                'selectedPaymentMethodAndMode': 'PREPAID',
+                'valutaSelected': 'false',
+            }
+        else:
+            self.payment_method = "Invoice"
+            data = {
+                    "selectedPaymentMethodAndMode": "INVOICE",
+                    "valutaSelected": "false"
+            }
+        while True:
+            try:
+                response = self.scraper.post('https://www.otto.de/order/checkout/basket/0/paymentSelection/save',data=data,params={
+                    'cache': randint(0, 9999)
+                }, headers=headers)
+                if response:
+                    self.scraper.logger.log("Submitted Payment")
+                    break
+            except Exception as e:
+                self.scraper.logger.error(f"SubmittingPayment : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingPayment: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+    
+    def checkout(self):
+        self.scraper.logger.log("Submitting Checkout")
+        while True:
+            headers = {
+                'Host': 'www.otto.de',
+                'sec-ch-ua': self.chrome_sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'user-agent': self.user_agent,
+                'sec-ch-ua-arch': '"x86"',
+                'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'sec-ch-ua-platform-version': '"15.0.0"',
+                'x-requested-with': 'XMLHttpRequest',
+                'sec-ch-ua-full-version-list': self.chrome_sec_ch_ua,
+                'sec-ch-ua-bitness': '"64"',
+                'sec-ch-ua-model': '""',
+                'sec-ch-ua-platform': self.ua_platform,
+                'accept': '*/*',
+                'origin': 'https://www.otto.de',
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-dest': 'empty',
+                'referer': 'https://www.otto.de/order/checkout',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            try:
+                response = self.scraper.post('https://www.otto.de/order/checkout/order',data={
+                    'basketHash': self.basket_hash,
+                    'checkoutHash': self.checkoutHash,
+                    'deviceType': 'desktop',
+                    'deviceOs': 'Windows 10',
+                }, headers=headers)
+                if response:
+                    if "es ist ein technischer Fehler aufgetreten und die Bestellung konnte leider nicht beendet werden" in response.text or 'o_order.utils.goto(window, "/order/checkout");' in response.text:
+                        self.scraper.logger.error("Checkout blocked")
+                        time.sleep(getRetryDelay())
+                        self.getcheckout()
+                    else:
+                        break
+            except Exception as e:
+                self.scraper.logger.error(f"Checkout : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | Checkout: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.success("Checked out!")
+        self.titelbar("-carts")
+        self.titelbar("success")
+        webhook_public({
+                "Store":"||Otto||",
+                "Product":f"{self.product_name}",
+                "Price":f"{self.product_price}",
+                "Payment Method":self.payment_method,
+                "Task Input": self.url}
+                ,img=self.product_picture,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=otto&url={self.url})")
+        webhook_private({
+                "Store":"||Otto||",
+                "Product":f"{self.product_name}",
+                "Price":f"{self.product_price}",
+                "Payment Method":self.payment_method,
+                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                "discordid":self.discordID
+                },img=self.product_picture,success=True,profile_webhook=self.profile_webhook,product_url=self.url)
+        sys.exit()
+       

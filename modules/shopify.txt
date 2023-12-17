@@ -1,0 +1,2181 @@
+import traceback, requests, time
+import lxml.html,uuid
+import urllib.parse
+from urllib.parse import urlparse,parse_qs
+
+
+try:
+    from src.functions.settings import *
+except ImportError: 
+    from functions.settings import *
+try:
+    from src.functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+try:
+    from src.functions.captcha import *
+except ImportError:
+    from functions.captcha import *
+
+
+try:
+    from ..functions.monitor import *
+except ImportError: 
+    from functions.monitor import *
+
+try:
+    from ..functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+
+try:
+    from ..functions.captcha_harvester import open_harvester, harvest_token
+except ImportError: 
+    from functions.captcha_harvester import open_harvester, harvest_token
+try:
+    from ..functions.captcha_harvester import login_cookies
+except ImportError: 
+    from functions.captcha_harvester import login_cookies
+"""try:
+    from ..functions.captcha_harvester import *
+except ImportError: 
+    from functions.captcha_harvester import *"""
+
+URL = ""
+apitasks = []
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    401: {"text":"Passwort page up","switch":False},
+    403: {"text":"403 Forbidden","switch":True},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+    430: {"text":"Ratelimit Error","switch":True},
+}
+
+
+active_harvester = []
+
+class SHOPIFY():
+    def __init__(self,data):
+        global URL
+        try:
+            self.titelbar = MODULETITEL({"store":"Shopify","values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.url = data["URL"]
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            if str(data["QUANTITY"]) == "":
+                self.quantity = 1
+            else:
+                try:
+                    self.quantity = int(data["QUANTITY"])
+                except:
+                    self.quantity = 1
+            self.payment_method = str(data["PAYMENT_METHOD"]).strip().lower()
+            
+            if self.payment_method in ["paypal","pp"]:
+                
+                self.payment_method_webhook = "PayPal"
+            
+            elif self.payment_method in ["klarna","paylater"]:
+                
+                self.payment_method_webhook = "Klarna"
+            
+            else:
+                self.payment_method_webhook = "CreditCard"
+
+
+            self.mode = str(data["MODE"]).strip().lower()
+            
+            if "fast" in self.mode:
+                
+                self.mode_webhook = "Fast "
+                self.fast_mode = True
+            else:
+                
+                self.mode_webhook = "Safe "
+                self.fast_mode = False
+            if "preload" in self.mode:
+                
+                self.mode_webhook += "Preload"
+                self.preload_mode = True
+            
+            else:
+                self.preload_mode = False
+                self.mode_webhook += ""
+            
+            if "experimental" in self.mode:
+                
+                self.experimental_mode = True
+            else:
+                
+                self.experimental_mode = False
+            
+            if "drop" in self.mode:
+                self.drop_mode = True
+            else:
+                self.drop_mode = False
+            self.experimental_mode = True
+            self.keywords = str(data["KEYWORDS"])
+            self.positiv_keywords = []
+            self.negativ_keywords = []
+            
+            for i in self.keywords.split(","):
+                try:
+                    if i[0] == "+":
+                        self.positiv_keywords.append(str(i[1:]).lower())
+                    else:
+                        self.negativ_keywords.append(str(i[1:]).lower())
+                except:
+                    pass
+            """try:
+                open_harvester(profile_name="Your cool profile")
+            except:
+                pass"""
+            self.discordID = data["discordid"]
+            self.profile_name = data["PROFILE"]
+            self.email = data["EMAIL"]
+            self.first_name = data["FIRSTNAME"]
+            self.last_name = data["LASTNAME"]
+            self.address_1 = data["STREET_1"]
+            self.address_2 = data["STREET_2"]
+            self.zip_code = data["ZIPCODE"]
+            try:
+                if "," in data["SIZE"]:
+                    self.size = str(data["SIZE"]).split(",")
+                elif str(data["SIZE"]).strip() == "": self.size = None
+                else:
+                    self.size = data["SIZE"]
+            except:
+                self.size = None
+            self.housenumber = data["HOUSENUMBER"]
+            self.city = data["CITY"]
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            self.country_iso = data["COUNTRY_ISO"]
+            self.creditcard_number = data["CREDITCARD_NUMBER"]
+            self.creditcard_cvv = data["CREDITCARD_CVV"]
+            self.creditcard_year = data["CREDITCARD_YEAR"]
+            self.creditcard_month = data["CREDITCARD_MONTH"]
+            self.creditcard_name = data["CREDITCARD_HOLDER"]
+            self.graphql = False
+            self.customeridfunko = None
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except:
+                self.profile_webhook = ""
+            self.harvester_name = getSettingsdata()["data"]["HarvesterName"]
+            
+            if str(data["ACCOUNT_EMAIL"]).strip() != "" and str(data["ACCOUNT_PASSWORD"]).strip() != "":
+                if str(self.harvester_name).strip() =="":
+                    print("Please set a Captcha Harvester!")
+                    while True:
+                        time.sleep(1)
+                self.account_email = str(data["ACCOUNT_EMAIL"]).strip()
+                self.account_password = str(data["ACCOUNT_PASSWORD"]).strip()
+                if self.harvester_name not in active_harvester:
+                    active_harvester.append(self.harvester_name)
+                    open_harvester(profile_name=self.harvester_name)
+                else: 
+                    pass
+            else:
+                self.account_email = None
+            self.province = data["PROVINCE"]
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module="Shopify",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = self.scraper.user_agent
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            
+            if str(self.url).strip().lower() == "api":
+                self.web_socket()
+            self.header_domain = urlparse(self.url).netloc
+            if self.fast_mode:
+                self.fastmode()
+            else:
+                self.normalmode()
+        except Exception as e:
+            self.scraper.logger.error(f"Profile error",log_message=f"shopify | Task Error: {traceback.format_exc(),e}")
+            self.titelbar("-Task(s)")
+            time.sleep(15)
+            sys.exit()
+
+    def injection(self, session : requests.session, response :requests.Response):
+        
+        if "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporailiy Banned")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+        elif str(response.status_code) == "401":
+            self.scraper.logger.warn(f"Password page is up")
+            time.sleep(getRetryDelay())
+            return None
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+        elif str(response.status_code) == "422":
+            if "is already sold out" in response.text:
+                return response
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+
+    def web_socket(self):
+        global URL
+        apitasks.append(str(self.scraper.taskcount).replace("Task","").strip())
+        import websocket
+        from websocket import create_connection
+        self.scraper.logger.warn("Connected to API")
+        while True:
+            if int(self.scraper.taskcount) == int(min(apitasks)):
+                try:
+                    ws =  create_connection("wss://cosphix.herokuapp.com")
+                    message = ws.recv()
+                    if str(json.loads(message)["action"]).strip().lower() == "apisignal":
+                        if str(json.loads(message)["store"]).strip().lower() == str(self.scraper.module).strip().lower():
+                            self.url = str(json.loads(message)["url"]).strip()
+                            self.scraper.logger.success("Got restock Signal")
+                            URL = self.url
+                            ws.close()
+                            break
+                except websocket._exceptions.WebSocketConnectionClosedException:
+                    pass
+            else:
+                if URL != "":
+                    self.url = URL
+                    break
+
+
+    def aspahltgoldprop(self,pid):
+        t = 0
+        for i in str(pid):
+            t = 31 * (t + int(i))
+            t %= 16777216
+        return t
+    
+    def accessToken(self):
+        while True:
+            get = self.scraper.get(f"https://{self.header_domain}/payments/config", headers={
+                    "Host": self.header_domain,
+                    "Connection": "keep-alive",
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "user-agent": self.user_agent,
+                    "Referer": self.url,
+                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+                })
+            if get:
+                try:
+                    self.access_token = get.json()["paymentInstruments"]["accessToken"]
+                    self.shop_id = get.json()["paymentInstruments"]["checkoutConfig"]["shopId"]
+                    try:
+                        self.currencyCode = get.json()["paymentInstruments"]["applePayConfig"]["currencyCode"]
+                    except:
+                        self.currencyCode = get.json()["paymentInstruments"]["currency"]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error Scraping Info",log_message=f"{str(self.scraper.module).strip().lower()} | GetAccessToken: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+    def login(self):
+        
+        if self.header_domain == "funkoeurope.com":
+            try:
+                with open(getPath() + f"/config/funko.json") as f:
+                    data = json.load(f)
+                self.customeridfunko = data[self.account_email]
+                return
+            except: pass
+        uuid_login = uuid.uuid4()
+        threading.Thread(target=harvest_token, args=("login", f"https://{self.header_domain}/account/login",self.account_password,self.account_email,uuid_login)).start()
+        while True:
+            try:
+                login_cookies[uuid_login]
+                break
+            except:
+                pass
+        for i in login_cookies[uuid_login]["cookies"]:
+            self.scraper.session.cookies.set(i,login_cookies[uuid_login]["cookies"][i])
+        if self.header_domain == "funkoeurope.com":
+            try:
+                self.customeridfunko = login_cookies[uuid_login]["customerid"]
+                try:
+                    with open(getPath() + f"/config/funko.json") as f:
+                        data = json.load(f)
+                    data[self.account_email] = self.customeridfunko
+                    with open(getPath() + f"/config/funko.json", 'w') as json_file:
+                        json.dump(data, json_file, indent=4)
+                except:
+                    pass
+            except:
+                self.customeridfunko = None
+        return
+    def clearCart(self):
+        self.scraper.logger.log("Clearing Cart")
+        while True:
+            get = self.scraper.get(f"https://{self.header_domain}/cart/clear.js")
+            if get:
+                if get.json()["item_count"] == 0:
+                    self.scraper.logger.log("Cart cleared")
+                    break
+                else:
+                    self.scraper.logger.error("Cart cleared",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {get.text}")
+                    time.sleep(getRetryDelay())
+
+    def getProduct(self):
+        self.startTime = time.time()
+        self.scraper.logger.log("Getting Product")
+        monitor = MONITOR({
+            "store":self.scraper.module,
+            "product":self.url,
+            "tasknumber":self.scraper.taskcount
+        })
+        while True:
+            self.size_list = []
+            get = self.scraper.get(f"{self.url}?order={random_with_N_digits(7)}&format=js&q={random_with_N_digits(10)}")
+            if get:
+                try:
+                    if "Coming Soon" in get.json()["tags"]:
+                        if monitor.is_monitor():
+                            self.scraper.logger.warn("Product coming soon")
+                            time.sleep(getMonitorDelay())
+                            continue
+                        else:
+                            self.scraper.logger.warn("Product coming soon, switching to passiv Mode")
+                            while monitor.is_live() == False:
+                                time.sleep(3)
+                            continue
+                    for product in get.json()['variants']:
+                        if product['available'] == True:
+                            if self.size:
+                                if product['option1'] in self.size:
+                                    self.size_list.append({
+                                        "price":product['price'] / 100,
+                                        "size":product['option1'],
+                                        "variant":product['id'],
+                                        "shipping":product['requires_shipping'],
+                                    })
+                            else:
+                                self.size_list.append({
+                                    "price":product['price'] / 100,
+                                    "size":product['option1'],
+                                    "variant":product['id'],
+                                    "shipping":product['requires_shipping'],
+                                })
+                            
+                            self.product_name = get.json()['title']
+                            try:
+                                self.product_pic = get.json()['images'][0]["src"] if" https:" in get.json()['images'][0]["src"] else "https:" + get.json()['images'][0]["src"]
+                            except:
+                                try:    
+                                    self.product_pic = get.json()['images'][0] if" https:" in get.json()['images'][0] else "https:" + get.json()['images'][0]
+                                except:
+                                    self.product_pic = ""
+                    if self.size_list != []:
+                        monitor.instock()
+                        self.scraper.logger.success(f"Got Product")
+                        break
+                    else:
+                        if monitor.is_monitor():
+                            self.scraper.logger.error(f"Product OOS")
+                            time.sleep(getMonitorDelay())
+                        else:
+                            self.scraper.logger.warn("Product OOS, switching to passiv Mode")
+                            while monitor.is_live() == False:
+                                time.sleep(1)
+                            continue
+                except Exception as e:
+                    self.scraper.logger.error(f"Error getting Product",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {e}")
+                    time.sleep(getRetryDelay())
+    
+    def preloadmode(self):
+        self.scraper.logger.log("Starting Preload")
+        self.getProduct()
+        if "asphaltgold" in self.url:
+            self.asphaltgoldATC()
+        
+        else:
+            self.normalATC()
+        if self.graphql == False:
+            self.normalSHIPPING()
+            self.normalSHIPPINGRATE()
+        else:
+            self.graphqlSHIPPING()
+        self.clearCart()
+
+    def normalmode(self):
+        self.accessToken()
+        if self.account_email:
+            self.login()
+        if self.preload_mode:
+            self.preloadmode()
+            if self.graphql == False: self.normalPAYMENT()
+            else: 
+                self.graphqlPAYMENT()
+                self.graphqlPOLL()
+        else:
+            if "products" in str(self.url).strip().lower():
+                self.use_keywords = False
+                self.getProduct()
+            else:
+                self.use_keywords = True
+                self.getProductbyKW()
+            if "asphaltgold" in self.url:
+                self.asphaltgoldATC()
+            elif "eu.kith" in self.url or "funkoeurope.com" in self.url:
+                self.kitheuATC()
+            else:
+                self.normalATC()
+            if self.header_domain == "funkoeurope.com" or self.header_domain == "eu.kith.com":
+                if self.header_domain == "eu.kith.com":
+                    self.MerchantID = "708"
+                    self.ver_path = "8rxx"
+                    self.carttoken_url = "https://gem-fs.global-e.com/1/Checkout/GetCartToken"
+                else:
+                    self.MerchantID = "738"
+                    self.ver_path = "8r0f"
+                    self.carttoken_url = "https://gepi.global-e.com/Checkout/GetCartToken"
+                self.loadCheckoutfunkokith()
+                self.funkoShipping()
+                self.funkopayment()
+            elif self.graphql == False:
+                self.normalSHIPPING()
+                self.normalSHIPPINGRATE()
+                self.normalPAYMENT()
+            
+            else:
+                self.graphqlSHIPPING()
+                self.graphqlPAYMENT()
+                self.graphqlPOLL()
+    
+    
+    def fastmode(self):
+        self.accessToken()
+        if "products" in str(self.url).strip().lower():
+            self.getProduct()
+        else:
+            self.getProductbyKW()
+        self.fastATC()
+        #self.fastSHIPPING()
+        if str(self.price) == "0.00":
+            self.fastFREEPAYMENT()
+        else:
+            self.normalPAYMENT()
+    
+    def getProductbyKW(self):
+        self.scraper.logger.log("Getting Products")
+        
+        while True:
+            sizeFound = False
+            get = self.scraper.get(f"https://{self.header_domain}/products.json?order={random_with_N_digits(7)}&q={random_with_N_digits(10)}")
+            self.size_list = []
+            if get:
+                for i in get.json()["products"]:
+                    name = str(i["title"]).lower().split(" ")
+                    is_kw=set.intersection(set(name),set(self.positiv_keywords))
+                    if len(self.positiv_keywords) == len(is_kw):
+                        self.product_name = i['title']
+                        self.product_pic = i['images'][0]["src"] if "https:" in i['images'][0]["src"] else "https:" + i['images'][0]["src"]
+                        self.url = f"https://{self.header_domain}/products/{i['handle']}"
+                        for item in i["variants"]:
+                            if item["available"] == True:
+                                self.size_list.append({
+                                "price":str(item['price']),
+                                "size":item['option1'],
+                                "variant":item['id'],
+                                "shipping":item['requires_shipping'],
+                            })
+                            
+                            sizeFound = True
+                        if sizeFound:
+                            break
+                if sizeFound and len(self.size_list) != 0:
+                    self.scraper.logger.success(f"Got Product")
+                    break
+                else:
+                    self.scraper.logger.warn(f"Searching for Product")
+                    continue
+
+
+
+
+    def fastATC(self,shipping_rate=None):
+        self.scraper.logger.log("Adding to Cart")
+        randomsize = random.choice(self.size_list)
+        self.variant = randomsize["variant"]
+        self.product_price = randomsize["price"]
+        self.product_size = randomsize["size"]
+        self.requiresShipping = randomsize["shipping"]
+        if shipping_rate != None:
+            json_data = {
+                        'checkout': {
+                            'line_items': [
+                                {
+                                    'variant_id': self.variant,
+                                    'quantity': self.quantity,
+                                },
+                            ],
+                            "email":self.email,
+                            "phone":self.phone_number,
+                            'shipping_address': {
+                                'first_name': self.first_name,
+                                'last_name': self.last_name,
+                                'address1': f"{self.address_1} {self.housenumber}",
+                                'address2': f"{self.address_2}",
+                                'city': self.city,
+                                'province_code': self.province,
+                                'country_code': self.country_iso,
+                                'phone': self.phone_number,
+                                'zip': self.zip_code,
+                            },
+                            'billing_address': {
+                                'first_name': self.first_name,
+                                'last_name': self.last_name,
+                                'address1': f"{self.address_1} {self.housenumber}",
+                                'address2': f"{self.address_2}",
+                                'city': self.city,
+                                'province_code': self.province,
+                                'country_code': self.country_iso,
+                                'phone': self.phone_number,
+                                'zip': self.zip_code,
+                            },
+                            'shipping_line': {
+                                'handle': shipping_rate,
+                            },
+                            "taxes_included": True,
+                            "secret": True,
+                            "wallet_name": "Checkout",
+                            "is_upstream_button": False,
+                            "page_type": "product"
+                        },
+                    }
+        else:
+            json_data = {
+                'checkout': {
+                    'line_items': [
+                        {
+                            'variant_id': self.variant,
+                            'quantity': 1,
+                        },
+                    ],
+                    "email":self.email,
+                    "phone":self.phone_number,
+                    'shipping_address': {
+                        'first_name': self.first_name,
+                        'last_name': self.last_name,
+                        'address1': f"{self.address_1} {self.housenumber}",
+                        'address2': f"{self.address_2}",
+                        'city': self.city,
+                        'province_code': self.province,
+                        'country_code': self.country_iso,
+                        'phone': self.phone_number,
+                        'zip': self.zip_code,
+                    },
+                    'billing_address': {
+                        'first_name': self.first_name,
+                        'last_name': self.last_name,
+                        'address1': f"{self.address_1} {self.housenumber}",
+                        'address2': f"{self.address_2}",
+                        'city': self.city,
+                        'province_code': self.province,
+                        'country_code': self.country_iso,
+                        'phone': self.phone_number,
+                        'zip': self.zip_code,
+                    },
+                    "taxes_included": True,
+                    "secret": True,
+                    "wallet_name": "Checkout",
+                    "is_upstream_button": False,
+                    "page_type": "product"
+                },
+            }    
+        while True:
+            response = self.scraper.post(f'https://{self.header_domain}/wallets/checkouts.json', headers={
+                        "content-type":"application/json",
+                        'x-shopify-storefront-access-token': self.access_token,
+                    }, json=json_data)
+            if response:
+                try:
+                    self.price = response.json()["checkout"]["total_price"]
+                    self.posturl = response.json()["checkout"]["web_url"]
+                    self.token = response.json()["checkout"]["token"]
+                    self.checkout_id = response.json()["checkout"]["token"]
+                    self.titelbar("carts")
+                    break
+                except Exception as e:
+                    if "not_enough_in_stock" in response.text:
+                        self.scraper.logger.error("OOS, retrying")
+                        time.sleep(getRetryDelay())
+                        continue
+                    self.scraper.logger.error(f"Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATCfast: {response.text}")
+                    time.sleep(getRetryDelay())
+
+    def fastSHIPPINGRATE(self):
+        while True:
+            response = self.scraper.get(f"https://{self.header_domain}/wallets/unstable/checkouts/{self.token}/shipping_rates.json", headers={
+                    "content-type":"application/json",
+                    'x-shopify-storefront-access-token': self.access_token,
+                })
+
+            if response:
+                try:
+                    self.shippingrate = response.json()["shipping_rates"][0]["id"]
+                    return response.json()["shipping_rates"][0]["id"]
+                except:
+                    self.scraper.logger.error(f"Error getting Shipping Rate",log_message=f"{str(self.scraper.module).strip().lower()} | SHIPPINGRATEfast: {response.text}")
+                    time.sleep(getRetryDelay())
+
+
+
+    def fastSHIPPING(self):
+        self.scraper.logger.log("Submitting Shipping Rate")
+        while True:
+            response = self.scraper.put(f'https://{self.header_domain}/wallets/unstable/checkouts/{self.token}.json', headers={
+                        'x-shopify-storefront-access-token': self.access_token,
+                    }, json={
+                        'checkout': {
+                            'shipping_line': {
+                                'handle': self.fastSHIPPINGRATE(),
+                            },
+                        },
+                    })
+
+            if response:
+                try:
+                    if response.json()["checkout"]["shipping_line"]["handle"] != None:
+                        self.scraper.logger.log("Submitted Shipping Rate")
+                        break
+                    else:
+                        self.scraper.logger.error("Error submitting Shipping Rate, retrying")
+                        time.sleep(getRetryDelay())
+                        continue
+                except :
+                    self.scraper.logger.error(f"Error submitting Shipping Rate",log_message=f"{str(self.scraper.module).strip().lower()} | SHIPPINGfast: {response.text}")
+                    time.sleep(getRetryDelay())
+
+    def fastCC(self):
+        self.scraper.logger.log("Submitting CreditCard")
+        while True:
+            postb = self.scraper.post(f"https://{self.header_domain}/wallets/unstable/checkouts/{self.token}/payments.json",headers={
+                    "content-type":"application/json",
+                    'Retry-After': '1',
+                    'x-shopify-storefront-access-token': self.access_token,
+                },json={
+                    'payment': {
+                        'request_details': {
+                            'ip_address': '123.1.1.1',
+                            'accept_language': 'en-US,en;q=0.8,fr;q=0.6',
+                            "user-agent": self.user_agent,
+                        },
+                        "credit_card": {
+                            "first_name": self.first_name,
+                            "last_name": self.last_name,
+                            "first_digits": "540362",
+                            "last_digits": "7712",
+                            "brand": "Master",
+                            "expiry_month": 6,
+                            "expiry_year": 2026,
+                        },
+                        'amount': self.price,
+                        'unique_token': "".join(random.choice("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") for i in range(10)) ,
+                        "payment_token": {
+                            "payment_data": "",
+                            "type": "shopify_payments"
+                        }
+                    },
+                })
+            break
+    
+            
+    def universalCREDITCARDSESSION(self):
+        while True:
+            response = self.scraper.post('https://deposit.us.shopifycs.com/sessions', headers={
+                        'Accept': 'application/json',
+                        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        'Connection': 'keep-alive',
+                        'Origin': 'https://checkout.shopifycs.com',
+                        'Referer': 'https://checkout.shopifycs.com/',
+                        'Sec-Fetch-Dest': 'empty',
+                        'Sec-Fetch-Mode': 'cors',
+                        'Sec-Fetch-Site': 'same-site',
+                        "user-agent": self.user_agent,
+                        'sec-ch-ua': self.chrome_sec_ch_ua,
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-platform': self.ua_platform,
+                    }, json={
+                        'credit_card': {
+                            'number': ' '.join(str(self.creditcard_number).replace(" ","")[i:i+4] for i in range(0, len(str(self.creditcard_number).replace(" ","")), 4)),
+                            'name': self.creditcard_name,
+                            'start_month': None,
+                            'start_year': None,
+                            'month': int(self.creditcard_month) if str(self.creditcard_month)[:1] != "0" else int(self.creditcard_month[1:]),
+                            'year':  int(self.creditcard_year) if str(self.creditcard_year)[:2] == "20" else int("20"+str(self.creditcard_year)),
+                            'verification_value': str(self.creditcard_cvv),
+                            'issue_number': '',
+                        },
+                        'payment_session_scope': self.header_domain,
+                    })
+
+            if response.status_code == 200:
+                try:
+                    return response.json()["id"]
+
+                except:
+                    self.scraper.logger.error(f"Error getting CreditCard information",log_message=f"{str(self.scraper.module).strip().lower()} | CREDITCARDfast: {response.text}")
+                    time.sleep(getRetryDelay())
+    
+
+    def fastFREEPAYMENT(self):
+        self.scraper.logger.log("Submitting Payment")
+        while True:
+            
+            response = self.scraper.post(f'https://{self.header_domain}/wallets/unstable/checkouts/{self.token}/complete.json', headers={
+                    'x-shopify-storefront-access-token': self.access_token,
+                    'Retry-After': '1',
+                }, json={})
+            if response:
+                try:
+                    self.processing_url = response.json()["checkout"]["processing_url"]
+                    self.checkout_id = str(self.processing_url).split("checkouts/")[1].split("/processing")[0]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error submitting Payment",log_message=f"{str(self.scraper.module).strip().lower()} | FREEPAYMENTfast: {response.text}")
+                    time.sleep(getRetryDelay())
+
+    
+
+    def queuehandling(self):
+        self.scraper.logger.log("Polling Queue")
+        self.poll_token = self.scraper.session.cookies.get_dict()["_checkout_queue_token"]
+        while True:
+            response = self.scraper.post(f'https://{self.header_domain}/queue/poll',headers={
+                    'authority': self.header_domain,
+                    'accept': '*/*',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'origin': f'https://{self.header_domain}',
+                    'referer': f'https://{self.header_domain}/throttle/queue',
+                    'sec-ch-ua': self.chrome_sec_ch_ua,
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': self.ua_platform,
+                    'sec-fetch-dest': 'empty',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-site': 'same-origin',
+                    'user-agent': self.user_agent,
+                }, json={
+                    'query': '\n      {\n        poll(token: $token) {\n          token\n          pollAfter\n          queueEtaSeconds\n          productVariantAvailability {\n            id\n            available\n          }\n        }\n      }\n    ',
+                    'variables': {
+                        'token': self.poll_token,
+                    },
+                })
+            if response:
+                try:
+                    from datetime import datetime
+                    from datetime import datetime, timedelta
+                    from dateutil import parser
+                    if response.json()["data"]["poll"]["__typename"] == "PollContinue":
+                        self.queue_token = response.json()["data"]["poll"]["token"]
+                        try:
+                            if response.json()['data']['poll']['productVariantAvailability'][0]["available"] == False:
+                                self.scraper.logger.error("Product OOS")
+                                if "fast" in self.mode:
+                                    self.fastmode()
+                                else:
+                                    self.normalmode()
+                        except:
+                            pass
+                        if response.json()['data']['poll']['queueEtaSeconds'] == 0:
+                            self.scraper.logger.log(f"Waiting in Queue")
+                            time.sleep(getRetryDelay())
+                        elif response.json()['data']['poll']['queueEtaSeconds'] > 0:
+                            self.scraper.logger.log(f"Queue ETA: {response.json()['data']['poll']['queueEtaSeconds']} Seconds")
+                            while datetime.strptime(str(response.json()["data"]["poll"]["pollAfter"]).split("+")[0].split(".")[0], "%Y-%m-%dT%H:%M:%S") + timedelta(hours=1) > parser.parse(datetime.now().strftime("%Y-%m-%d %H:%M:%S").split("Z")[0]):
+                                pass
+                    elif response.json()["data"]["poll"]["__typename"] == "PollComplete":
+                        self.scraper.logger.log("Passed Queue")
+                        break
+
+                except Exception as e:
+                    self.scraper.logger.error(f"Error Waiting in Queue",log_message=f"{str(self.scraper.module).strip().lower()} | QUEUE: {response.url,response.text}")
+                    time.sleep(getRetryDelay())
+
+    def kitheuATC(self):
+        self.scraper.logger.log("Adding to Cart")
+        headers = {
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "accept-encoding": "gzip, deflate",
+            "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "origin": f"https://{self.header_domain}",
+            "referer": self.url,
+            "user-agent": self.user_agent,
+            "x-requested-with": "XMLHttpRequest"
+        }
+
+        while True:
+            randomsize = random.choice(self.size_list)
+            self.variant = randomsize["variant"]
+            self.product_price = randomsize["price"]
+            self.product_size = randomsize["size"]
+            self.requiresShipping = randomsize["shipping"]
+            data = {
+                "form_type": "product",
+                "utf8": "✓",
+                "id": self.variant,
+                "quantity": self.quantity
+            }
+            post = self.scraper.post(f"https://{self.header_domain}/cart/add.js",headers=headers,data=data)
+            if "is already sold out" in str(post.json()):
+                self.scraper.logger.error("Item went OOS while carting")
+                self.getProduct()
+                self.kitheuATC()
+                if self.header_domain == "eu.kith.com":
+                    self.MerchantID = "708"
+                    self.ver_path = "8rxx"
+                    self.carttoken_url = "https://gem-fs.global-e.com/1/Checkout/GetCartToken"
+                else:
+                    self.MerchantID = "738"
+                    self.ver_path = "8r0f"
+                    self.carttoken_url = "https://gepi.global-e.com/Checkout/GetCartToken"
+                self.loadCheckoutfunkokith()
+                self.funkoShipping()
+                self.funkopayment()
+                sys.exit()
+            if post:
+                if post.json()["quantity"] != 0:
+                    self.scraper.logger.log("Added to Cart")
+                    self.titelbar("carts")
+                    break
+                else:
+                    self.scraper.logger.error("Error adding to Cart")
+                    time.sleep(getRetryDelay())
+                    continue
+        while True:
+            get = self.scraper.get(f"https://{self.header_domain}/cart.js",headers=headers)
+            if get:
+                try:
+                    self.cartJson = get.json()
+                    break
+                except:
+                    self.scraper.logger.error("Error getting  Cart data")
+                    time.sleep(getRetryDelay())
+                    continue
+    
+    def asphaltgoldATC(self):
+        self.scraper.logger.log("Adding to Cart")
+        headers = {
+            'authority': self.header_domain,
+            'accept': '*/*',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/json',
+            'origin': 'https://www.asphaltgold.com',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            randomsize = random.choice(self.size_list)
+            self.variant = randomsize["variant"]
+            self.product_price = randomsize["price"]
+            self.product_size = randomsize["size"]
+            self.requiresShipping = randomsize["shipping"]
+            response = self.scraper.post(f'https://{self.header_domain}/cart/add.js', headers=headers, json={
+                'items': [
+                    {
+                        'id': self.variant,
+                        'quantity': 1,
+                        'properties': {
+                            '_token': self.aspahltgoldprop(self.variant),
+                        },
+                    },
+                ],
+            })
+            if response:
+                if len(response.json()["items"]) != 0:
+                    self.scraper.logger.log("Added to Cart")
+                    self.titelbar("carts")
+                    break
+                else:
+                    self.scraper.logger.error("Error adding to Cart")
+                    time.sleep(getRetryDelay())
+                    continue
+        headers = {
+            'authority': 'www.asphaltgold.com',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'none',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            response = self.scraper.get(f'https://{self.header_domain}/checkout', headers=headers)
+            if response:
+                try:
+                    try:
+                        self.checkout_id = response.url.split("checkouts/")[1].split("?")[0]
+                    except:
+                        self.checkout_id = response.url.split("checkouts/")[1]
+                    break
+                except:
+                    self.scraper.logger.error(f"Error getting Checkout ID",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckoutID: {response.url}")
+                    time.sleep(getRetryDelay())
+
+    def normalATC(self,preload=False):
+        self.scraper.logger.log("Adding to Cart")
+        headers = {
+            'authority': self.header_domain,
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        
+        while True:
+            
+            randomsize = random.choice(self.size_list)
+            self.variant = randomsize["variant"]
+            self.product_price = randomsize["price"]
+            self.product_size = randomsize["size"]
+            self.requiresShipping = randomsize["shipping"]
+            if preload == False:
+                params = {
+                    'traffic_source': 'buy_now',
+                }
+                            
+                atcurl = f'https://{self.header_domain}/cart/{self.variant}:{self.quantity}'
+            else:
+                atcurl = f"https://{self.header_domain}/cart/add?id={self.variant}&qty={self.quantity}"
+                params = {}
+            response = self.scraper.get(atcurl, params=params, headers=headers)
+
+            if response:
+                if "checkpoint" in response.url:
+                    uuid_login = uuid.uuid4()
+                    threading.Thread(target=harvest_token, args=("login", f"https://{self.header_domain}/checkpoint",self.account_password,self.account_email,uuid_login,self.scraper.session.cookies.get_dict())).start()
+                    while True:
+                        try:
+                            login_cookies[uuid_login]
+                            break
+                        except:
+                            pass
+                    for i in login_cookies[uuid_login]:
+                        self.scraper.session.cookies.set(i,login_cookies[uuid_login]["cookies"][i])
+                    while True:
+                            response = self.scraper.get(f"https://{self.header_domain}/checkout",headers=headers)
+                            if response:
+                                break
+                if "throttle" in response.url and self.header_domain != "funkoeurope.com":
+                    self.queuehandling()
+                    if self.experimental_mode and str(self.shop_id) not in response.url:
+                        headers = {
+                                        'authority': self.header_domain,
+                                        'accept': 'application/json',
+                                        'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                                        'authorization': 'Basic '+base64.b64encode(str(self.access_token).encode()).decode('UTF-8'),
+                                        'content-type': 'application/json',
+                                        'origin': f'https://{self.header_domain}',
+                                        'referer': f'https://{self.header_domain}',
+                                        'sec-ch-ua': self.chrome_sec_ch_ua,
+                                        'sec-ch-ua-mobile': '?0',
+                                        'sec-ch-ua-platform': self.ua_platform,
+                                        'sec-fetch-dest': 'empty',
+                                        'sec-fetch-mode': 'cors',
+                                        'sec-fetch-site': 'same-origin',
+                                        'user-agent': self.user_agent,
+                                        'x-shopify-checkout-version': '2018-03-05',
+                                        'x-shopify-wallets-caller': 'costanza',
+                                    }
+                        json_data = {
+                                    'checkout': {
+                                        'cart_token': self.scraper.session.cookies.get_dict()["cart"],
+                                        'secret': True,
+                                        'is_upstream_button': False,
+                                        'page_type': '',
+                                        'has_selling_plans': False,
+                                        'presentment_currency': 'EUR',
+                                    },
+                                }
+                        while True:
+                            response = self.scraper.post(
+                                            f'https://{self.header_domain}/wallets/checkouts.json',
+                                            headers=headers,
+                                            json=json_data,
+                                    )
+                            if response:
+                                try:
+                                    self.checkout_id = response.json()["checkout"]["token"]
+                                    self.web_url = response.json()["checkout"]["web_url"]
+                                    
+                                    break
+                                except Exception as e:
+                                    self.scraper.logger.error(f"Error getting experimental Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | experimentalCheckout: {e}")
+                                    time.sleep(getRetryDelay())
+                        break
+                    response = self.scraper.get(f"https://{self.header_domain}/checkout", params=params, headers=headers)
+                    if response:
+                        if "/checkouts" in response.url:
+                            
+
+                            if str(self.shop_id) in response.url:
+                                try:
+                                    try:
+                                        self.checkout_id = response.url.split("checkouts/")[1].split("?")[0]
+                                    except:
+                                        self.checkout_id = response.url.split("checkouts/")[1]
+                                    self.scraper.logger.log("Added to Cart")
+                                    self.titelbar("carts")
+                                    break
+                                except:
+                                    self.scraper.logger.error(f"Error getting Checkout ID",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckoutID: {response.url}")
+                                    time.sleep(getRetryDelay())
+                            else:
+
+                                try:
+                                    try:
+                                        self.checkout_id = self.scraper.session.cookies.get_dict()["cart"]
+                                    except:
+                                        self.checkout_id = str(self.scraper.session.cookies.get_dict()).split('checkout_session_token__c__')[1].split('":')
+                                    try:
+                                        self.queue_token = self.scraper.session.cookies.get_dict()["queue_token"]
+                                    except:
+                                        self.queue_token = response.text.split('<div data-serialized-id="queue-token" data-serialized-value="')[1].split('"')[0]
+                                    self.sessionToken = json.loads(urllib.parse.unquote(self.scraper.session.cookies.get_dict()[f"checkout_session_token__c__{self.checkout_id}"]))["token"]
+                                    self.scraper.logger.log("Added to Cart")
+                                    self.titelbar("carts")
+                                    self.graphql = True
+                                    break
+                                except:
+                                    self.scraper.logger.error(f"Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckoutID: {response.url}")
+                                    time.sleep(getRetryDelay())
+                        else:
+                            self.scraper.logger.error(f"Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {response.url}")
+                            time.sleep(getRetryDelay())
+
+                    continue
+                if self.experimental_mode and str(self.shop_id) not in response.url:
+                        while True:
+                            response = self.scraper.post(
+                                            f'https://{self.header_domain}/wallets/checkouts.json',
+                                            headers={
+                                        'authority': self.header_domain,
+                                        'accept': 'application/json',
+                                        'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                                        'authorization': 'Basic '+base64.b64encode(str(self.access_token).encode()).decode('UTF-8'),
+                                        'content-type': 'application/json',
+                                        'origin': f'https://{self.header_domain}',
+                                        'referer': f'https://{self.header_domain}',
+                                        'sec-ch-ua': self.chrome_sec_ch_ua,
+                                        'sec-ch-ua-mobile': '?0',
+                                        'sec-ch-ua-platform': self.ua_platform,
+                                        'sec-fetch-dest': 'empty',
+                                        'sec-fetch-mode': 'cors',
+                                        'sec-fetch-site': 'same-origin',
+                                        'user-agent': self.user_agent,
+                                        'x-shopify-checkout-version': '2018-03-05',
+                                        'x-shopify-wallets-caller': 'costanza',
+                                    },
+                                            json={
+                                    'checkout': {
+                                        'cart_token': self.scraper.session.cookies.get_dict()["cart"],
+                                        'secret': True,
+                                        'is_upstream_button': False,
+                                        'page_type': '',
+                                        'has_selling_plans': False,
+                                        'presentment_currency': 'EUR',
+                                    },
+                                },
+                                    )
+                            if response:
+                                try:
+                                    self.checkout_id = response.json()["checkout"]["token"]
+                                    self.web_url = response.json()["checkout"]["web_url"]
+                                    break
+                                except Exception as e:
+                                    self.scraper.logger.error(f"Error getting experimental Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | experimentalCheckout: {e}")
+                                    time.sleep(getRetryDelay())
+                        break
+                if self.header_domain == "funkoeurope.com" and "throttle" in response.url:
+                    self.scraper.logger.log("Added to Cart")
+                    self.titelbar("carts")
+                    break
+                if "/checkouts" in response.url:
+                    if str(self.shop_id) in response.url:
+                        try:
+                            try:
+                                self.checkout_id = response.url.split("checkouts/")[1].split("?")[0]
+                            except:
+                                self.checkout_id = response.url.split("checkouts/")[1]
+                            self.scraper.logger.log("Added to Cart")
+                            self.titelbar("carts")
+                            break
+                        except:
+                            self.scraper.logger.error(f"Error getting Checkout ID",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckoutID: {response.url}")
+                            time.sleep(getRetryDelay())
+                    else:
+                        try:
+                            try:
+                                self.checkout_id = self.scraper.session.cookies.get_dict()["cart"]
+                            except:
+                                self.checkout_id = str(self.scraper.session.cookies.get_dict()["cart"]).split('checkout_session_token__c__')[1].split('":')
+                            try:
+                                self.queue_token = self.scraper.session.cookies.get_dict()["queue_token"]
+                            except:
+                                self.queue_token = response.text.split('<div data-serialized-id="queue-token" data-serialized-value="')[1].split('"')[0]
+                            self.sessionToken = json.loads(urllib.parse.unquote(self.scraper.session.cookies.get_dict()[f"checkout_session_token__c__{self.checkout_id}"]))["token"]
+                            self.scraper.logger.log("Added to Cart")
+                            self.titelbar("carts")
+                            self.graphql = True
+                            break
+                        except:
+                            self.scraper.logger.error(f"Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | GetCheckoutID: {response.url}")
+                            time.sleep(getRetryDelay())
+                else:
+                    self.scraper.logger.error(f"Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {response.url}")
+                    time.sleep(getRetryDelay())
+
+    def getCartRates(self):
+        while True:
+            response = self.scraper.get(f'https://{self.header_domain}/cart/shipping_rates.json?shipping_address[zip]={self.zip_code}&shipping_address[country]={self.country}&shipping_address[province]={self.province}')
+            if response:
+                try:
+                    return f"shopify-{response.json()['shipping_rates'][0]['code']}-{response.json()['shipping_rates'][0]['price']}"
+                except Exception as e:
+                    self.scraper.logger.error(f"Error getting Shipping rates",log_message=f"{str(self.scraper.module).strip().lower()} | ShippingRates: {response.text}")
+                    time.sleep(getRetryDelay())
+    
+    
+    def normalSHIPPING(self):
+        self.scraper.logger.log("Submitting Shipping")
+        headers = {
+            'cache-control': 'max-age=0',
+            'sec-ch-ua':self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            "origin": self.url,
+            'upgrade-insecure-requests': '1',
+            "dnt": '1',
+            'content-type': 'application/x-www-form-urlencoded',
+            'user-agent': self.user_agent,
+            "accept":'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-user': '?1',
+            'sec-fetch-dest': 'document',
+            "referer": f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}?step=contact_information',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9'
+        }
+        data = [
+            ('_method', 'patch'),
+            ('previous_step', 'contact_information'),
+            ('step', 'shipping_method'),
+            ('authenticity_token', ''),
+            ('checkout[email_or_phone]', self.email),
+            ('checkout[email]', self.email),
+            ('checkout[buyer_accepts_marketing]', '0'),
+            ('checkout[pick_up_in_store][selected]', 'false'),
+            ("checkout[id]", "delivery-shipping"),
+            ('checkout[shipping_address][country]', self.country),
+            ('checkout[shipping_address][first_name]', self.first_name),
+            ('checkout[shipping_address][last_name]', self.last_name),
+            ('checkout[shipping_address][company]', ''),
+            ('checkout[shipping_address][address1]', f"{self.address_1} {self.housenumber}"),
+            ('checkout[shipping_address][address2]', self.address_2),
+            ('checkout[shipping_address][zip]', self.zip_code),
+            ('checkout[shipping_address][city]', self.city),
+            ('checkout[shipping_address][phone]', self.phone_number),
+            ('checkout[remember_me]', 'false'),
+            ('checkout[remember_me]', '0'),
+            ('checkout[client_details][browser_width]', '1701'),
+            ('checkout[client_details][browser_height]', '1283'),
+            ('checkout[client_details][javascript_enabled]', '1'),
+            ('checkout[client_details][color_depth]', '24'),
+            ('checkout[client_details][java_enabled]', 'false'),
+            ('checkout[client_details][browser_tz]', '-120'),
+        ]
+        try:
+            self.shipping_url = self.web_url
+        except:
+            self.shipping_url = f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}'
+        while True:
+            response = self.scraper.post(self.shipping_url,headers=headers,data=data)
+            if response:
+                doc = lxml.html.fromstring(response.content)
+                try:
+                    try:
+                        self.shipping_rate = doc.xpath("//input[@name='checkout[shipping_rate][id]']")[0].attrib['data-backup']
+                    except:
+                        self.shipping_rate = doc.xpath("//input[@name='checkout[shipping_rate][id]']")[0].attrib['value']
+                    self.scraper.logger.log("Submitted Shipping")
+                    break
+                except Exception as e:
+                    
+                    self.scraper.logger.error(f"SubmittingShipping: {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingShipping: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+    def normalSHIPPINGRATE(self):
+        self.scraper.logger.log("Submitting Shipping rate")
+        headers = {
+            'cache-control': 'max-age=0',
+            'sec-ch-ua':self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            "origin": self.url,
+            'upgrade-insecure-requests': '1',
+            "dnt": '1',
+            'content-type': 'application/x-www-form-urlencoded',
+            'user-agent': self.user_agent,
+            "accept":'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-user': '?1',
+            'sec-fetch-dest': 'document',
+            "referer": f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}?previous_step=contact_information&step=shipping_method',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9'
+        }
+        data = {
+            '_method': 'patch',
+            'authenticity_token': '',
+            'previous_step': 'shipping_method',
+            'step': 'payment_method',
+            'checkout[shipping_rate][id]': self.shipping_rate,
+            'checkout[client_details][browser_width]': '1701',
+            'checkout[client_details][browser_height]': '1283',
+            'checkout[client_details][javascript_enabled]': '1',
+            'checkout[client_details][color_depth]': '24',
+            'checkout[client_details][java_enabled]': 'false',
+            'checkout[client_details][browser_tz]': '-120',
+        }
+        while True:
+            response = self.scraper.post(f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}',headers=headers,data=data)
+            if response:
+                try:
+                    if self.payment_method_webhook == "CreditCard" : self.payment_gateway = ""
+                    else: self.payment_gateway = lxml.html.fromstring(response.content).xpath("//div[@data-gateway-name='paypal']")[0].attrib['data-select-gateway']
+                    self.scraper.logger.log("Submitted Shipping rate")
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"SubmittingShippingRate: {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingShippingRate: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+    def normalPAYMENT(self):
+        if self.fast_mode:
+            self.payment_gateway = ""        
+        self.scraper.logger.log("Submitting Payment")
+        headers = {
+            'content-type': 'application/x-www-form-urlencoded',
+            "referer": f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1'
+        }
+        data = {
+            '_method': 'patch',
+            'authenticity_token': '',
+            'previous_step': 'payment_method',
+            'step': 'review',
+            's': "",
+            "complete": "1",
+            'checkout[payment_gateway]': self.payment_gateway,
+            "checkout[credit_card][vault]": "false",
+            'checkout[different_billing_address]': 'false',
+            'checkout[client_details][browser_width]': '1701',
+            'checkout[client_details][browser_height]': '1283',
+            'checkout[client_details][javascript_enabled]': '1',
+            'checkout[client_details][color_depth]': '24',
+            'checkout[client_details][java_enabled]': 'false',
+            'checkout[client_details][browser_tz]': '-120',
+            }
+        
+        if self.payment_method_webhook == "CreditCard" or self.fast_mode:
+            data["s"] = self.universalCREDITCARDSESSION()
+            del data["checkout[payment_gateway]"]
+        while True:
+            response = self.scraper.post(f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}',headers=headers,data=data)
+            
+            if response:
+                try:
+                    if "processing" not in response.url:
+                        if "?validate=true" in response.url:
+                            self.scraper.logger.error(f"Payment Declined")
+                            webhook_private({
+                                "Store":f"Shopify ({self.header_domain})",
+                                "Product":self.product_name,
+                                "Price":self.product_price,
+                                "Size":self.product_size,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.product_pic,success=False,profile_webhook=self.profile_webhook,product_url=self.url)
+                            self.titelbar("-carts")
+                            self.titelbar("failed")
+                            break
+                        elif "/stock_problems" in response.url:
+                            self.scraper.logger.error(f"OOS during Checkout")
+                            if self.fast_mode:
+                                self.fastmode()
+                            else:
+                                self.normalmode()
+                            sys.exit()
+                        elif "paypal" in response.url:
+                            self.scraper.logger.success(f"Successful Checkout!")
+                            self.titelbar("-carts")
+                            self.titelbar("success")
+                            webhook_public({
+                                "Store":f"Custom Shopify ({self.header_domain})",
+                                "Item":f"{self.product_name}",
+                                "Item Size":f"{self.product_size}",
+                                "Price":f"{self.product_price} {self.currencyCode}",
+                                "Payment Method":f"{self.payment_method_webhook}",
+                                "Mode":f"{self.mode_webhook}",
+                                "Task Input": self.keywords if self.use_keywords else self.url,
+                                }
+                                ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                            try:
+                                webhook_private({
+                                    "Store":f"||Custom Shopify ({self.header_domain})||",
+                                    "Product":f"{self.product_name}",
+                                    "Product Size":f"{self.product_size}",
+                                    "Price":f"{self.product_price} {self.currencyCode}",
+                                    "Payment Method":f"{self.payment_method_webhook}",
+                                    "Mode":f"{self.mode_webhook}",
+                                    "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                    "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                    "discordid":self.discordID
+                                    },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,product_url=self.url,url=generateUrl(self.scraper,response.url))
+                            except Exception as e:
+                                print(e)
+                                input()
+                            break
+                        elif "thank_you" in response.url:
+                            self.scraper.logger.success(f"Successful Checkout!")
+                            self.titelbar("-carts")
+                            self.titelbar("success")
+                            webhook_public({
+                                "Store":f"Shopify ({self.header_domain})",
+                                "Product":self.product_name,
+                                "Size":self.product_size,
+                                "Price":self.product_price,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Task Input": self.keywords if self.use_keywords else self.url,
+                                }
+                                ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                                
+                            webhook_private({
+                                "Store":f"||Shopify ({self.header_domain})||",
+                                "Product":self.product_name,
+                                "Size":self.product_size,
+                                "Price":self.product_price,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,product_url=self.url)
+                            break
+                    else:
+                        self.processing_url = response.url
+                        self.normalPROCESSING()
+                        break
+                except Exception as e:
+                    self.scraper.logger.error(f"SubmittingPayment: {e}",log_message=f"{str(self.scraper.module).strip().lower()} | SubmittingPayment: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+        
+    def normalPROCESSING(self):
+        headers = {
+            'content-type': 'application/x-www-form-urlencoded',
+            "referer": f'https://{self.header_domain}/{self.shop_id}/checkouts/{self.checkout_id}',
+        }
+        self.scraper.logger.magenta("Processing")
+        while True:
+            get = self.scraper.get(self.processing_url,headers=headers)
+            if get:
+                if "processing" not in get.url:
+                    if "?validate=true" in get.url:
+                        self.scraper.logger.error(f"Payment Declined")
+                        webhook_private({
+                            "Store":f"Shopify ({self.header_domain})",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.product_pic,success=False,profile_webhook=self.profile_webhook,product_url=self.url)
+                        self.titelbar("-carts")
+                        self.titelbar("failed")
+                        sys.exit()
+                    elif "/stock_problems" in get.url:
+                        self.scraper.logger.error(f"OOS during Checkout")
+                        self.titelbar("-carts")
+                        self.titelbar("failed")
+                        sys.exit()
+                    elif "paypal" in get.url:
+                        self.scraper.logger.success(f"Successful Checkout!")
+                        self.titelbar("-carts")
+                        self.titelbar("success")
+                        webhook_public({
+                            "Store":f"Shopify ({self.header_domain})",
+                            "Product":self.product_name,
+                            "Price":self.product_price,
+                            "Size":self.product_size,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Task Input": self.keywords if self.use_keywords else self.url,
+                            }
+                            ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                            
+                        webhook_private({
+                            "Store":f"||Shopify ({self.header_domain})||",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,get.url),product_url=self.url)
+                        sys.exit()
+                    elif "thank_you" in get.url:
+                        self.scraper.logger.success(f"Successful Checkout!")
+                        self.titelbar("-carts")
+                        self.titelbar("success")
+                        webhook_public({
+                            "Store":f"Shopify ({self.header_domain})",
+                            "Product":self.product_name,
+                            "Price":self.product_price,
+                            "Size":self.product_size,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Task Input": self.keywords if self.use_keywords else self.url,
+                            }
+                            ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                            
+                        webhook_private({
+                            "Store":f"||Shopify ({self.header_domain})||",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,get.url),product_url=self.url)
+                        sys.exit()
+                    elif "https://hooks.stripe.com/3d_secure_2" in get.url:
+                            self.payment_intent_client_secret = parse_qs(urlparse(get.url).query)['payment_intent_client_secret'][0]
+                            self.payment_intent = parse_qs(urlparse(get.url).query)['payment_intent'][0]
+                            self.merchant = parse_qs(urlparse(get.url).query)['merchant'][0]
+                            self.publishable_key = parse_qs(urlparse(get.url).query)['publishable_key'][0]
+                            self.source = parse_qs(urlparse(get.url).query)['source'][0]
+                            self.authStripe()
+                    else:
+
+                        self.scraper.logger.error(f"Processing: Unhandled Response",log_message=f"{str(self.scraper.module).strip().lower()} | Processing: {get.url}")
+                        self.titelbar("-carts")
+                        self.titelbar("failed")
+                        sys.exit()
+    
+    
+    def authStripe(self):
+        self.scraper.logger.log("Authenticating Stripe")
+        headers = {
+            'authority': 'api.stripe.com',
+            'accept': 'application/json',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/x-www-form-urlencoded',
+            'origin': 'https://js.stripe.com',
+            'referer': 'https://js.stripe.com/',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'user-agent': self.user_agent,
+        }
+        data = 'source='+self.source+'&browser=%7B%22fingerprintAttempted%22%3Afalse%2C%22fingerprintData%22%3Anull%2C%22challengeWindowSize%22%3A%2205%22%2C%22threeDSCompInd%22%3A%22Y%22%2C%22browserJavaEnabled%22%3Afalse%2C%22browserJavascriptEnabled%22%3Atrue%2C%22browserLanguage%22%3A%22de-DE%22%2C%22browserColorDepth%22%3A%2224%22%2C%22browserScreenHeight%22%3A%221440%22%2C%22browserScreenWidth%22%3A%223440%22%2C%22browserTZ%22%3A%22-60%22%2C%22browserUserAgent%22%3A%22Mozilla%2F5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit%2F537.36+(KHTML%2C+like+Gecko)+Chrome%2F107.0.0.0+Safari%2F537.36%22%7D&one_click_authn_device_support[hosted]=true&one_click_authn_device_support[same_origin_frame]=false&one_click_authn_device_support[spc_eligible]=false&one_click_authn_device_support[webauthn_eligible]=true&one_click_authn_device_support[publickey_credentials_get_allowed]=true&key='+self.publishable_key+'&_stripe_account='+self.merchant
+        while True:
+            response = self.scraper.post('https://api.stripe.com/v1/3ds2/authenticate', headers=headers, data=data)
+            if response:
+                try:
+                    if response.json()["state"] == "succeeded":
+                        break
+                    elif response.json()["state"] == "challenge_required":
+                        self.scraper.logger.log("3DS required")
+                        self.acsTransID = response.json()["ares"]["acsTransID"]
+                        self.acsURL = response.json()["ares"]["acsURL"]
+                        self.creq = response.json()["creq"]
+                        self.threedschallange()
+                    else:
+                        self.scraper.logger.error(f"AuthenticatingStripe: Unhandled Response",log_message=f"{str(self.scraper.module).strip().lower()} | Processing: {response.text}")
+                        self.titelbar("-carts")
+                        self.titelbar("failed")
+                        sys.exit()
+                except:
+                    self.scraper.logger.error(f"AuthenticatingStripe: Unhandled Response",log_message=f"{str(self.scraper.module).strip().lower()} | Processing: {response.text}")
+                    self.titelbar("-carts")
+                    self.titelbar("failed")
+                    sys.exit()
+
+        headers = {
+            'authority': self.header_domain,
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'referer': 'https://hooks.stripe.com/',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'cross-site',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        params = {
+            'payment_intent': self.payment_intent,
+            'payment_intent_client_secret': self.payment_intent_client_secret,
+            'source_type': 'card',
+        }
+
+        while True:
+            response = self.scraper.get(f'https://{self.header_domain}/{self.shop_id}/stripe/authentications/authentication_callback', params=params, headers=headers)
+            if response:
+                if "processing" in response.url:
+                    self.processing_url = response.url
+                    self.normalPROCESSING()
+                    sys.exit()
+                elif "thank_you" in response.url:
+                    self.scraper.logger.success(f"Successful Checkout!")
+                    self.titelbar("-carts")
+                    self.titelbar("success")
+                    webhook_public({
+                            "Store":f"Shopify ({self.header_domain})",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Task Input": self.keywords if self.use_keywords else self.url,
+                            }
+                            ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                            
+                    webhook_private({
+                            "Store":f"||Shopify ({self.header_domain})||",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,response.url),product_url=self.url)
+                    sys.exit()
+                else:
+                    self.scraper.logger.error(f"Checkout: Unhandled Response",log_message=f"{str(self.scraper.module).strip().lower()} | Processing: {response.text}")
+                    self.titelbar("-carts")
+                    self.titelbar("failed")
+                    sys.exit()
+    def threedschallange(self):
+        headers = {
+            'Host': 'acs.revolut.com',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'upgrade-insecure-requests': '1',
+            'origin': 'https://js.stripe.com',
+            'user-agent': self.user_agent,
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-dest': 'iframe',
+            'referer': 'https://js.stripe.com/',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        while True:
+            response = self.scraper.post(self.acsURL, headers=headers, data={
+                'creq': self.creq,
+            })
+            if response: break
+        headers = {
+            'Host': 'acs.revolut.com',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'accept': 'application/json, text/plain, */*',
+            'sec-ch-ua-mobile': '?0',
+            'user-agent': self.user_agent,
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': self.acsURL,
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        while True:
+            response = self.scraper.get(f'https://acs.revolut.com/transactions/status/{self.acsTransID}', headers=headers)
+            if response:
+                if response.json()["status"] == "PENDING":
+                    self.scraper.logger.magenta("3DS pending")
+                    time.sleep(3)
+                    continue
+                elif response.json()["status"] == "AUTHENTICATED":
+                    self.scraper.logger.warn("3DS Success!")
+                    while True:
+                        response = self.scraper.post(f'https://acs.revolut.com/challenges/browser/{self.token}/submit', headers={
+                            'authority': 'poseidon.revolut.com',
+                            'accept': 'application/json, text/plain, */*',
+                            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                            'content-type': 'application/json;charset=UTF-8',
+                            'origin': "https://acs.revolut.com",
+                            'referer': 'https://acs.revolut.com/challenges/browser',
+                            'sec-ch-ua': self.chrome_sec_ch_ua,
+                            'sec-ch-ua-mobile': '?0',
+                            'sec-ch-ua-platform': self.ua_platform,
+                            'sec-fetch-dest': 'empty',
+                            'sec-fetch-mode': 'cors',
+                            'sec-fetch-site': 'same-origin',
+                            'User-Agent': self.user_agent,
+                        }, json={
+                            'reason': 'AUTHENTICATED',
+                        })
+                        if response: break
+                elif response.json()["status"] == "DECLINED":
+                    webhook_private({
+                            "Store":f"||Shopify ({self.header_domain})||",
+                            "Product":self.product_name,
+                            "Size":self.product_size,
+                            "Price":self.product_price,
+                            "Payment Method":self.payment_method_webhook,
+                            "Mode":self.mode_webhook,
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.product_pic,success=False,profile_webhook=self.profile_webhook,product_url=self.url)
+                    os._exit()
+                
+    def getCaptcha(self):
+        success = False
+        self.scraper.logger.magenta("Requesting Captcha")
+        while success == False:
+            try:
+                get = requests.get("http://harvester.eu.kith.com:5050/token")
+            except:
+                try:
+                    get = requests.get("http://localhost:8383/token")
+                    if get.json()["success"]:
+                        captcha_token = get.json()["response"]
+                        success = get.json()["success"]
+                except Exception:
+                    continue
+            if get.json()["success"]:
+                captcha_token = get.json()["response"]
+                success = get.json()["success"]
+        return captcha_token
+    
+    def loadCheckoutfunkokith(self):
+        self.scraper.logger.log("Loading Checkout")
+        
+        if str(self.country_iso).upper() == "BE":
+            CultureCode = "en-GB"
+        else:
+            CultureCode = str(self.country_iso).lower()
+        
+        if self.drop_mode:
+            self.captchaResponse = self.getCaptcha()
+        else:
+            self.captchaResponse = ''
+
+        headers = {
+            'authority': urlparse(self.carttoken_url).netloc,
+            'accept': '*/*',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/x-www-form-urlencoded',
+            'origin': f'https://{self.header_domain}',
+            'referer': f'https://{self.header_domain}',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': f'{self.ua_platform}',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'cross-site',
+            'user-agent': self.user_agent,
+        }
+        params = {
+            'merchantUniqueId': self.MerchantID,
+        }
+        if "eu.kith.com" in self.url:
+            data = {
+                    'MerchantCartToken': str(self.scraper.session.cookies.get_dict()["cart"]),
+                    'CountryCode': str(self.country_iso).upper(),
+                    'CurrencyCode': 'EUR',
+                    'CultureCode': CultureCode,
+                    'MerchantId': self.MerchantID, 
+                    'GetCartTokenUrl': 'https://gem-fs.global-e.com/1',
+                    'ClientCartContent': self.cartJson,
+                    'AdditionalCartData':'%5B%5D',
+                    'CaptchaResponseToken': self.captchaResponse
+                }
+        else:
+            ClientCartContent = urllib.parse.urlencode({'ClientCartContent': json.dumps(self.cartJson)})
+            data = f"MerchantCartToken={str(self.scraper.session.cookies.get_dict()['cart'])}&CountryCode={str(self.country_iso).upper()}&CurrencyCode=EUR&CultureCode={CultureCode}&MerchantId={self.MerchantID}&WebStoreCode={self.header_domain}&CustomerId={self.customeridfunko}&{ClientCartContent}&AdditionalCartData=%255B%255D"
+            
+        while True:
+            get = self.scraper.post(self.carttoken_url,params=params,headers=headers,data=data)
+            if get:
+                try:
+                    self.cartToken = get.json()["CartToken"]
+                    break
+                except:
+                    self.scraper.logger.error("Error while getting Cart token",log_message=f"{str(self.scraper.module).strip().lower()} | CartToken: {get.text}")
+                    time.sleep(getRetryDelay())
+                    continue
+        while True:
+            get = self.scraper.get(f"https://fs{self.MerchantID}.global-e.com/Checkout/v2/{self.ver_path}/{self.cartToken}",headers=headers)
+            if get:
+                try:
+                    doc = lxml.html.fromstring(get.content)
+                    self.CultureID = doc.xpath("//input[@id='CheckoutData_CultureID']")[0].attrib['value']
+                    self.GASessionsID = doc.xpath("//input[@id='CheckoutData_GASessionsID']")[0].attrib['value']
+                    self.forterToken = doc.xpath("//input[@id='forterToken']")[0].attrib['value']
+                    self.clientID = get.text.split('clientId: "')[1].split('"')[0]
+                    self.countryID = doc.xpath(f"//option[@data-code2='{str(self.country_iso).upper()}']")[0].attrib['value']
+                    self.scraper.logger.log("Got checkout")
+                    break
+                except Exception as e:
+                    self.scraper.logger.error("Error while getting Cart token",log_message=f"{str(self.scraper.module).strip().lower()} | CartToken: {get.text}")
+                    time.sleep(getRetryDelay())
+                    continue
+    
+    def funkoShipping(self):
+        if self.MerchantID == "738":
+            self.scraper.logger.log("Getting Shipping Rates")
+            headers = {
+                'authority': f'fs{self.MerchantID}.global-e.com',
+                'accept': 'text/html, */*; q=0.01',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                'content-type': 'application/json; charset=UTF-8',
+                'cultureid': self.CultureID,
+                'origin': f'https://fs{self.MerchantID}.global-e.com',
+                'referer': f'https://fs{self.MerchantID}.global-e.com/Checkout/v2/{self.ver_path}/{self.cartToken}',
+                'sec-ch-ua': self.chrome_sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': f'{self.ua_platform}',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
+                'user-agent': self.user_agent,
+                'x-requested-with': 'XMLHttpRequest',
+            }
+        
+            json_data = {
+                'Action': 1,
+                'Token': self.cartToken,
+                'MerchantId': 748,
+                'ShippingCountryID': str(self.countryID),
+                'ShippingMethodID': 0,
+                'CultureID': self.CultureID,
+                'BillingData': {
+                    'FirstName': '',
+                    'LastName': '',
+                    'Address1': '',
+                    'Address2': '',
+                    'Phone': '',
+                    'CountryId': str(self.countryID),
+                    'City': '',
+                    'Zip': '',
+                    'Email': '',
+                },
+                'ShippingData': {
+                    'FirstName': '',
+                    'LastName': '',
+                    'Address1': '',
+                    'Address2': '',
+                    'Phone': '',
+                    'CountryId': str(self.countryID),
+                    'City': '',
+                    'Zip': '',
+                },
+                'City': '',
+                'StoreID': None,
+                'IsCollectionPoints': False,
+                'BillingSameAsShipping': False,
+            }
+        
+            while True:
+                post = self.scraper.post(f'https://fs738.global-e.com/checkoutv2/handleaction/1/{self.cartToken}/{self.ver_path}',json=json_data,headers=headers)
+                if post:
+                    if post.json()["success"] == True:
+                        shipping_rate = post.json()["shippingOptions"][0]["ID"]
+                        break
+                    else:
+                        self.scraper.logger.error("Error while getting Shipping rates",log_message=f"{str(self.scraper.module).strip().lower()} | ShippingRate: {post.text}")
+                        time.sleep(getRetryDelay())
+                        continue
+        else:
+            if self.countryID == "190" or self.countryID == "211" or self.countryID == "165":
+                shipping_rate = "30005050"
+            elif self.countryID == "226" or self.countryID == "88":
+                shipping_rate = "30016234"
+            else:
+                shipping_rate = "2728"
+        
+        
+        self.scraper.logger.success("Submitting Shipping")            
+        headers = {
+            'authority': f'fs{self.MerchantID}.global-e.com',
+            'accept': '*/*',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'origin': f'https://fs{self.MerchantID}.global-e.com',
+            'referer': f'https://fs{self.MerchantID}.global-e.com/Checkout/v2/{self.ver_path}/{self.cartToken}',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': f'{self.ua_platform}',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': self.user_agent,
+            'x-requested-with': 'XMLHttpRequest',
+        }
+        data = {
+            "CheckoutData.CartToken":str(self.cartToken),
+            "CheckoutData.CultureID":str(self.CultureID),
+            "CheckoutData.GASessionsID":str(self.GASessionsID),
+            "CheckoutData.IsVirtualOrder":"False",
+            "CheckoutData.ExternalData.CurrentGatewayId":"6",
+            "CheckoutData.ForterToken":str(self.forterToken),
+            "CheckoutData.ExternalData.UnsupportedCharactersErrorTipTimeout":"15000",
+            "CheckoutData.ExternalData.ShowFullNameField":"False",
+            "CheckoutData.EnableUnsupportedCharactersValidation":"True",
+            "CheckoutData.BillingFirstName":self.first_name,
+            "CheckoutData.BillingLastName":self.last_name,
+            "CheckoutData.Email":self.email,
+            "CheckoutData.BillingCountryID":str(self.countryID),
+            "CheckoutData.BillingAddress1":f"{self.address_1} {self.housenumber}",
+            "CheckoutData.BillingAddress2":"",
+            "CheckoutData.BillingCity":self.city,
+            "CheckoutData.BillingCountyID":"",
+            "CheckoutData.BillingZIP":self.zip_code,
+            "CheckoutData.BillingStateID":"",
+            "CheckoutData.BillingPhone":str(self.phone_number).replace("+","00"),
+            "CheckoutData.ShippingType":"NewShippingAddress",
+            "CheckoutData.ShippingFirstName":self.first_name,
+            "CheckoutData.ShippingLastName":self.last_name,
+            "CheckoutData.ShippingCountryID":str(self.countryID),
+            "CheckoutData.ShippingAddress1":f"{self.address_1} {self.housenumber}",
+            "CheckoutData.ShippingAddress2":"",
+            "CheckoutData.ShippingCity":self.city,
+            "CheckoutData.ShippingCountyID":"",
+            "CheckoutData.ShippingZIP":self.zip_code,
+            "CheckoutData.ShippingStateID":"",
+            "CheckoutData.ShippingPhone":str(self.phone_number).replace("+","00"),
+            "CheckoutData.SelectedShippingOptionID":shipping_rate,
+            "CheckoutData.SelectedTaxOption":"3",
+            "ioBlackBox":"0400AKHeWb1CT4UXk1Rjuv1iJgWxIe7xNABi4fWLoKuCjDO1I7X1XkVbR56yHWIulRE2G351wfp+MZWAa+qm7VSS+5sZhQDshHSvL1nHQLC7Q6PMSzmehRe8On2SOzubmcBOVtcqUhwQqm2+q1yRomE8gc+1AC2EV7gTtc8+Q1M+VjlHH4mi8h7X9PmvEOg0QCkSNk8p+SaOPJKnTJRD3SlE+4z8/yX9hyTE1qBH7CuG2cYMgog1WtCs0txF6Ft8Ea5XAHtlrOPcolu5kVyEZ5Un1A1zM3XireXLCHex/Y96FFfSctR6oPvoc/HBQm916StC15tFwbb5NkVtrNHzt95ePgXs+oQQc60trrGto44dFZ/k0B48ux+V4SxwhwBmNydI6S6la0lc7CNSwejOX5dhKDBAKBIrRLbRVKNQ0ZFLTxhHPFDg2mOda5E75agXQtdj5mNV6Qxgbckwx2tcx5lGRWLQVG6Wu5dBA/z8Qi7K1AaNm0URxgdANnwB7SaH85JmyAfUMZ5LKFqFl81CC76WZKXakoCa7XCW4IhJrOz08Pzf+x4pw6W9esbGEpq7CoRYvFQ3SxgXyvTx/y4JwLTE4Nxv4KowoTq9ZHvy+/OUGsT6WhmJ6uI+FEzI+mPNi65XSGFq0WvDIDWnFBXTiQwVA5aGaf80/3iSPOYe85lXFCR4CjSd/Iq56FG3EcsazU/5If+SxsuUFwyKCknSJs1HLUgFh/6610IF77A/AHthzIQI07p4tGGHBe8mR20/oWqfLQ/2q0KAoA7AqvQx/6iBZu5e8/+D72jCkHSh8xDIRr+FJsErkCCZYdT16TeM5diEHf7WUtiodkTjCCAKQfEFHFRukDiyEjh0DtPq/jlyS0vN1/EvKVgGJuwRUFY7xdAiqlr028/3Pq8VaJ4EfRqMsP7uzpZjbtz5zJmHSgKWcInIB9QxnksoWgDgFtbjU/i//xXxz5iHJ2Gi4wL5ZAuoseRsDHISKM19CXZjVj+Jpy/CWq368mRJ0sgH1DGeSyhahZfNQgu+lmSl2pKAmu1wluCISazs9PD83/seKcOlvXrGxhKauwqEWLxUN0sYF8r08f8uCcC0xODcb+CqMKE6vYdAd54v4pxJoyIHPMsM3kmWMCVbBcdxP+fMxqv4WdGaMrHg9Btf04cRCL7CUahnxfbKRXey06cY4a7euFqiMUivlcetxenoDd7uW4fKrTjGYSqEk9HYTgjgklNKGT1jRHxfYV3WeA0UZK211nKAo9ysA7oZ0bYcjqyUg7sNjWRD/a8We6nhBVkkxpY6vV1ZmNpeo69fq+suLh7/vXNSSrf24S1uO6XpqrPHg4UJ3v1LARL9wkv36UGe9i9NNGwrvViY2TSbe4LeLD4mV3TQqnxCcKKadzVSLO+d8TuQ5a+61yI9NBoVDObuig/wKeM18GaUEcqinpriak1JwUr1GLDcE4nZ3meVnnb6dxDiokse7hxjoy31alFmlBHKop6a4mpNScFK9Riw3BOJ2d5nlZ52+ncQ4qJLHu4cY6Mt9WpRZpQRyqKemuLpRlyC5JQyFQQy/m2yvWeDisJcGrsMT0jhCrWQJ8GIBSWF0XSBep4VBesMEnAumSY5gwigjNPezZ+6LKDhExOBib4W/3OnQOrMu2NrHyrdV+Iy+bCE+7Znxh47Cb10E/E8l7cJ2dOfeZj/O+c6f/yVKsTqaQQ3YBk44Dxay0rqRYIoO2nvTaKUVlYJAxOhmMDZVM7MRkb7AtwzlH1IdKjJV45XIih7UKkW2GbWIQ5cYrU0WgrAW29ZdUfT5agq0xg",
+            "CheckoutData.StoreID":"0",
+            "CheckoutData.AddressVerified":"true",
+            "CheckoutData.SelectedPaymentMethodID":"1",
+            "CheckoutData.CurrentPaymentGayewayID":"11",
+            "CheckoutData.MerchantID":self.MerchantID,
+            "CheckoutData.MultipleAddressesMode":"true",
+            "CheckoutData.MerchantSupportsAddressName":"false",
+            "CheckoutData.CollectionPointZip":"",
+            "CheckoutData.UseAvalara":"false",
+            "CheckoutData.IsAvalaraLoaded":"false",
+            "CheckoutData.IsUnsupportedRegion":"",
+            "CheckoutData.IsShowTitle":"false",
+            "CheckoutData.IsBillingSavedAddressUsed":"false",
+            "CheckoutData.IsShippingSavedAddressUsed":"false",
+            "CheckoutData.SaveBillingCountryOnChange":"false",
+            "CheckoutData.DisplayInternatioanlPrefixInCheckout":"false",
+            "CheckoutData.IsValidationMessagesV2":"false",
+            "CheckoutData.IgnoreBillingCityRegionValidation":"false",
+            "CheckoutData.IgnoreShippingCityRegionValidation":"false",
+            "CheckoutData.DoLightSave":"false"
+        }
+
+        while True:
+            post = self.scraper.post(f"https://fs{self.MerchantID}.global-e.com/checkoutv2/save/{self.ver_path}/{self.cartToken}", data=data, headers=headers)
+        
+            if post:
+                if post.json()['Success']:
+                    self.scraper.logger.success("Submitted Shipping")
+                    break
+                
+                else:
+                    self.scraper.logger.error("Error while Submitting Shipping",log_message=f"{str(self.scraper.module).strip().lower()} | SubShipping: {post.text}")
+                    time.sleep(getRetryDelay())
+                    continue
+    
+    def funkopayment(self):
+        self.scraper.logger.magenta("Submitting Order")
+        if self.payment_method_webhook == "CreditCard":
+            headers = {
+                'Host': 'securev2.global-e.com',
+                'sec-ch-ua': self.chrome_sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': self.ua_platform,
+                'upgrade-insecure-requests': '1',
+                'user-agent': self.user_agent,
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'sec-fetch-site': 'same-site',
+                'sec-fetch-mode': 'navigate',
+                'sec-fetch-dest': 'iframe',
+                'referer': f'https://fs{self.MerchantID}.global-e.com/',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            while True:
+                response = self.scraper.get(f'https://securev2.global-e.com/payments/CreditCardForm/{self.cartToken}/11',headers=headers)
+                if response:
+                    self.UrlStructureTokenEncoded = response.text.split('id="UrlStructureTokenEncoded" value="')[1].split('"')[0]
+                    break
+                else:
+                    self.scraper.logger.error("Error while getting CreditCard form",log_message=f"{str(self.scraper.module).strip().lower()} | CCform: {response.text}")
+                    time.sleep(getRetryDelay())
+                    continue
+            
+
+
+
+            headers = {
+                'authority': 'securev2.global-e.com',
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                'cache-control': 'max-age=0',
+                'content-type': 'application/x-www-form-urlencoded',
+                'origin': 'https://securev2.global-e.com',
+                'referer': f'https://securev2.global-e.com/payments/CreditCardForm/{self.cartToken}/11',
+                'sec-ch-ua': self.chrome_sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': self.ua_platform,
+                'sec-fetch-dest': 'iframe',
+                'sec-fetch-mode': 'navigate',
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-user': '?1',
+                'upgrade-insecure-requests': '1',
+                'user-agent': self.user_agent,
+            }
+            params = {
+                'mode': '13534',
+            }
+
+            data = {
+                'PaymentData.cardNum': self.creditcard_number,
+                'PaymentData.cardExpiryMonth': self.creditcard_month,
+                'PaymentData.cardExpiryYear': self.creditcard_year,
+                'PaymentData.cvdNumber': self.creditcard_cvv,
+                'PaymentData.checkoutV2': 'true',
+                'PaymentData.cartToken': self.cartToken,
+                'PaymentData.gatewayId': '11',
+                'PaymentData.paymentMethodId': '1',
+                'PaymentData.machineId': '',
+                'PaymentData.createTransaction': 'true',
+                'PaymentData.checkoutCDNEnabled': 'value',
+                'PaymentData.recapchaToken': '',
+                'PaymentData.recapchaTime': '',
+                'PaymentData.customerScreenColorDepth': '24',
+                'PaymentData.customerScreenWidth': '3440',
+                'PaymentData.customerScreenHeight': '1440',
+                'PaymentData.customerTimeZoneOffset': '-120',
+                'PaymentData.customerLanguage': 'de-DE',
+                'PaymentData.UrlStructureTokenEncoded': self.UrlStructureTokenEncoded,
+                'PaymentData.IsValidationMessagesV2': 'false',
+            }
+            while True:
+                response = self.scraper.post(f'https://securev2.global-e.com/1/Payments/HandleCreditCardRequestV2/{self.ver_path}/{self.cartToken}',params=params,headers=headers,data=data)
+                if response:
+                    self.order_id = response.text.split('OrderId: "')[1].split('"')[0]
+                    self.ActiveTransactionId = response.text.split('PaymentData.ActiveTransactionId" value="')[1].split('"')[0]
+                    break
+                else:
+                    self.scraper.logger.error("Error while submitting CreditCard",log_message=f"{str(self.scraper.module).strip().lower()} | SubCC: {response.text}")
+                    time.sleep(getRetryDelay())
+                    continue
+            data = {
+                'PaymentData.cardNum': self.creditcard_number,
+                'PaymentData.cvdNumber': self.creditcard_cvv,
+                'PaymentData.cardExpiryMonth': self.creditcard_month,
+                'PaymentData.cardExpiryYear': self.creditcard_year,
+                'PaymentData.checkoutV2': 'true',
+                'PaymentData.cartToken': self.cartToken,
+                'PaymentData.OrderId': self.order_id,
+                'PaymentData.gatewayId': '11',
+                'PaymentData.paymentMethodId': '1',
+                'PaymentData.machineId': '',
+                'PaymentData.createTransaction': 'false',
+                'PaymentData.checkoutCDNEnabled': '',
+                'PaymentData.TDInScriptResponse': '{"MessageType":"profile.completed","SessionId":"0_7c0a7c98-8c57-440c-9f35-afc86a1f35fb","Status":true}',
+                'PaymentData.ParentURL': '',
+                'PaymentData.GEData': '',
+                'PaymentData.SandboxData': '388',
+                'PaymentData.Is3DS2PreEnrollmentResponse': 'true',
+                'PaymentData.UseGatewayId': '',
+                'PaymentData.IsReroutePaymentFlow': 'False',
+                'PaymentData.CustomerScreenColorDepth': '24',
+                'PaymentData.CustomerScreenWidth': '3440',
+                'PaymentData.CustomerScreenHeight': '1440',
+                'PaymentData.CustomerTimeZoneOffset': '-120',
+                'PaymentData.CustomerLanguage': 'de-DE',
+                'PaymentData.UrlStructureTokenEncoded': self.UrlStructureTokenEncoded,
+                'PaymentData.ActiveTransactionId': self.ActiveTransactionId,
+            }
+            while True:
+                response = self.scraper.post(f'https://securev2.global-e.com/1/Payments/HandleCreditCardRequestV2/{self.ver_path}/{self.cartToken}',params=params,headers=headers,data=data)
+                if response:
+                    if "Sorry, we are unable to process your payment right now." in response.text:
+                        webhook_private({
+                                "Store":f"Shopify ({self.header_domain})",
+                                "Product":self.product_name,
+                                "Price":self.product_price,
+                                "Size":self.product_size,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.product_pic,success=False,profile_webhook=self.profile_webhook,product_url=self.url)
+                        self.scraper.logger.error("Payment Declined")
+                        sys.exit()
+                else:
+                    self.scraper.logger.success(f"Successful Checkout!")
+                    self.titelbar("-carts")
+                    self.titelbar("success")
+                    webhook_public({
+                                "Store":f"Shopify ({self.header_domain})",
+                                "Product":self.product_name,
+                                "Size":self.product_size,
+                                "Price":self.product_price,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Task Input": self.keywords if self.use_keywords else self.url,
+                                }
+                                ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                                
+                    webhook_private({
+                                "Store":f"||Shopify ({self.header_domain})||",
+                                "Product":self.product_name,
+                                "Size":self.product_size,
+                                "Price":self.product_price,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,product_url=self.url)
+                    sys.exit()
+        else:
+            json_data = {
+                'paymentMethodId': '4',
+                'cartToken': self.cartToken,
+                'machineId': '',
+                'pmExtraData': None,
+                'isNewWindow': False,
+            }
+
+            headers = {
+                'authority': f'fs{self.MerchantID}.global-e.com',
+                'accept': 'text/html, */*; q=0.01',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                'content-type': 'application/json; charset=UTF-8',
+                'cultureid': self.CultureID,
+                'origin': f'https://fs{self.MerchantID}.global-e.com',
+                'referer': f'https://fs{self.MerchantID}.global-e.com/Checkout/v2/{self.ver_path}/{self.cartToken}',
+                'sec-ch-ua': self.chrome_sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': f'{self.ua_platform}',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
+                'user-agent': self.user_agent,
+                'x-requested-with': 'XMLHttpRequest',
+            }
+
+            while True:
+                post = self.scraper.post(f'https://fs{self.MerchantID}.global-e.com/Payments/GetPaymentFormParametersV2/{self.ver_path}/{self.cartToken}',headers=headers,json=json_data)
+
+                if post:
+                    try:
+                        paypalUrl = post.json()["Action"]
+                        if "paypal" in paypalUrl:
+                            self.scraper.logger.success(f"Successful Checkout!")
+                            self.titelbar("-carts")
+                            self.titelbar("success")
+                            webhook_public({
+                                "Store":f"Shopify ({self.header_domain})",
+                                "Product":self.product_name,
+                                "Price":self.product_price,
+                                "Size":self.product_size,
+                                "Payment Method":self.payment_method_webhook,
+                                "Mode":self.mode_webhook,
+                                "Task Input": self.keywords if self.use_keywords else self.url,
+                                }
+                                ,img=self.product_pic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=shopify&url={self.url})")
+                                                
+                            webhook_private({
+                                "Store":f"||Shopify ({self.header_domain})||",
+                                "Product":self.product_name,
+                                "Size":self.product_size,
+                                "Price":self.product_price,
+                                "Payment Method":f"||{self.payment_method_webhook}||",
+                                "Mode":self.mode_webhook,
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.product_pic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper,paypalUrl),product_url=self.url)
+                            break
+                        else:
+                            self.scraper.logger.error("Error while submitting Order",log_message=f"{str(self.scraper.module).strip().lower()} | SubOrder: {post.text}")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except:
+                        self.scraper.logger.error("Error while submitting Order",log_message=f"{str(self.scraper.module).strip().lower()} | SubOrder: {post.text}")
+                        time.sleep(getRetryDelay())

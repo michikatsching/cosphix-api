@@ -1,0 +1,979 @@
+
+try:
+    from src.functions.settings import *
+except ImportError: 
+    from functions.settings import *
+try:
+    from src.functions.captcha import *
+except ImportError: 
+    from functions.captcha import *
+try:
+    from src.functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from functions.webhook import *
+try:
+    from src.functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+import hashlib,math,lxml.html
+from bs4 import BeautifulSoup
+
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":False},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+class QUEUEIT():
+    def __init__(self, task) -> None:
+        try:
+            self.titelbar = MODULETITEL({"store":"Queueit","values": ["Task(s)","Queue","Passed"]}).status_bar
+            self.titelbar("Task(s)")
+            self.tasknumber = task["tasknumber"]
+            proxies = task["proxy"]
+            #self.webhook = str(task["WEBHOOK"]).strip()
+            self.discordID = task["discordid"]
+            self.url = task["URL"]
+        except Exception as e:
+            print("Profile error, stopping task!")
+            sys.exit()
+        
+        self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module="QueueIT",taskcount=self.tasknumber)
+        self.scraper.create_session()
+        self.user_agent = self.scraper.user_agent
+        self.platform = self.scraper.get_ua_platform(self.user_agent)
+        self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+        self.sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+
+        res = self.loadQueue()
+        redirectUrl = self.handleQueue(self,self.scraper.session,res)
+        if redirectUrl:
+            self.notify(redirectUrl)
+    def injection(self, session : CREATE_SESSION, response :requests.Response):
+        
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code == 418:
+            return "Captcha"
+
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+    def loadQueue(self):
+
+        headers = {
+            'sec-ch-ua': self.sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': f'"{self.platform}"',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'sec-fetch-site': 'none',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-user': '?1',
+            'sec-fetch-dest': 'document',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7'
+        }
+
+        while True:
+            self.scraper.logger.log("Loading queue page")
+            getQueue = self.scraper.get(self.url, headers=headers)
+            if getQueue:
+                html = BeautifulSoup(getQueue.text, "html.parser")
+                title = html.title.text.lower()
+                if "queue" in getQueue.url or "queue" in title:
+                    self.titelbar("queue")
+                    return getQueue
+                else:
+                    self.scraper.logger.error("No queue found", log_message=f"QueueIT | loadQueue Error: {getQueue.status_code} | {getQueue.url}")
+                    time.sleep(getRetryDelay())
+                    continue
+    
+    def notify(self, url):
+        manual_url = generateUrl(scraper=self.scraper, url=url, domain_name=self.url.split("//")[1].split("/")[0])
+        webhook_private({
+                "Store":f"||{self.scraper.module}||",
+                "discordid":self.discordID,
+                "Task":f"{self.tasknumber}",
+            },url=manual_url,success=True,title="Queue Passed!",img="https://upload.wikimedia.org/wikipedia/commons/f/fd/Q-it_profile_beige_on_dark_green.jpg")
+        webhook_public({
+                "Store":f"||{self.scraper.module}||",
+                "Task Input":self.url
+            },img="https://upload.wikimedia.org/wikipedia/commons/f/fd/Q-it_profile_beige_on_dark_green.jpg",description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=queueit&url={self.url})")
+    
+    def softblock(instance, session, response, eventId, customerId, userId, origin, target, os, osver, queueId=None, layout=None):
+        while True:
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'x-queueit-challange-eventid': eventId,
+                    'x-queueit-challange-customerid': customerId,
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'x-queueit-challange-userid': userId,
+                    'x-queueit-challange-reason':'0',
+                    'x-queueit-challange-hash': hash,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'accept': '*/*',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+                res = instance.scraper.post(origin + '/challengeapi/queueitcaptcha/challenge/en-gb', headers=headers)
+                if res:
+                    try:
+                        captchaJson = res.json()
+                        text = captchaJson["imageBase64"]
+                        challengeDetails = captchaJson["challengeDetails"]
+                        sessionId = captchaJson["sessionId"]
+                    except Exception:
+                        instance.scraper.logger.error("Error parsing captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+                    
+                    try:
+                        instance.scraper.logger.warn("Solving queue-it captcha")
+                        captchaResponse = solve_image_captcha(text)
+                    except Exception:
+                        instance.scraper.logger.error("Error solving captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+            
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+
+                duration = random.randint(5000,26000)
+                    
+                json_data = {
+                        'challengeDetails': challengeDetails,
+                        'challengeType': 'botdetect',
+                        'customerId': customerId,
+                        'eventId': eventId,
+                        'sessionId': sessionId,
+                        'solution': captchaResponse,
+                        "stats":{
+                            "userAgent":instance.user_agent,
+                            "screen":"3456 x 2234",
+                            "browser":"Chrome",
+                            "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                            "isMobile":False,
+                            "os":os,
+                            "osVersion":osver,
+                            "cookiesEnabled":True,
+                            "tries":1,
+                            "duration":duration
+                        },
+                        'version': 6,
+                }
+
+                postCaptcha = instance.scraper.post(f'{origin}/challengeapi/verify', json=json_data, headers=headers)
+                if postCaptcha:
+                    try:
+                        captchaJson = postCaptcha.json()
+                        isVerified = captchaJson["isVerified"]
+                        if isVerified:
+                            captchaSessionInfo = captchaJson["sessionInfo"]
+                            break
+                        else:
+                            instance.scraper.logger.error("Error verifying captcha")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error verifying captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+        params = {
+                "c": customerId,
+                "e": eventId,
+                "t": target,
+                "cid": "en-GB",
+                "l": layout,
+                "scv": json.dumps(captchaSessionInfo, separators=(',', ':'))
+                }
+
+        if queueId:
+            params["q"] = queueId
+        if layout:
+            params["l"] = layout
+
+        return instance.scraper.get(f"{origin}/", params=params, headers={
+                    "sec-ch-ua": instance.sec_ch_ua,
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": f'"{instance.platform}"',
+                    "Upgrade-Insecure-Requests": "1",
+                    "user-agent": instance.scraper.user_agent,
+                    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+                    "sec-fetch-site": "same-origin",
+                    "sec-fetch-mode": "navigate",
+                    "sec-fetch-user": "?1",
+                    "sec-fetch-dest": "document",
+                    "referer": response.url,
+                    "accept-encoding": "gzip, deflate, br",
+                    "accept-language": "de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7",
+                }), captchaSessionInfo
+
+    
+    @staticmethod
+    def handleQueue(instance,session,response,layout=None,layoutVersion=None):
+        if instance.platform == "Windows":
+            os = "Windows NT"
+            osver = instance.user_agent.split("Windows NT ")[1].split(";")[0]
+        else:
+            os = "Mac OS X"
+            osver = instance.user_agent.split("Mac OS X ")[1].split(")")[0]
+
+        try:
+            challengeSessions = []
+            queueCookie = instance.scraper.session.cookies["Queue-it"]
+            userId = queueCookie.split("u=")[1]
+            origin = "https://" + response.url.split("/")[2]
+            print(response.text)
+            while True: time.sleep(1)
+            doc = lxml.html.fromstring(response.content)
+            
+            customerId = doc.xpath("//script[@id='queueit-perftiming-script']")[0].attrib['data-queueit-c']
+            eventId = doc.xpath("//script[@id='queueit-perftiming-script']")[0].attrib['data-queueit-tag-eventid']
+            
+            #target = response.history[0].url
+            print(response.text)
+            while True: time.sleep(1)
+            target = response.text.split("targetUrl: decodeURIComponent('")[1].split("'")[0]
+            if "softblock" in response.url:
+                instance.scraper.logger.warn("Softblock detected")
+                response, scv = QUEUEIT.softblock(instance,session,response,eventId,customerId,userId,origin,target,os,osver)
+            challenges = response.text.split("challenges: ")[1].split(",\n")[0]
+            layout = response.text.split("layout: '")[1].split("',")[0]
+            hash = response.text.split("ApiChecksumHash: '")[1].split("'")[0]
+            layoutVersion = int(response.text.split("layoutVersion:")[1].split(",")[0])
+        except Exception:
+            instance.scraper.logger.error("Error parsing queue", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+            return
+        
+        if "recaptcha" in challenges:
+            headers = {
+                'sec-ch-ua': instance.sec_ch_ua,
+                'x-queueit-challange-eventid': eventId,
+                'x-queueit-challange-customerid': customerId,
+                'sec-ch-ua-mobile': '?0',
+                'user-agent': instance.user_agent,
+                'x-queueit-challange-userid': userId,
+                'x-queueit-challange-hash': hash,
+                'x-queueit-challange-reason':'1',
+                'sec-ch-ua-platform': f'"{instance.platform}"',
+                'accept': '*/*',
+                'origin': origin,
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-dest': 'empty',
+                'referer': response.url,
+                'accept-encoding': 'gzip, deflate, br',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            while True:
+                instance.scraper.logger.log("Loading Captcha")
+                res = instance.scraper.post(origin + '/challengeapi/recaptcha/challenge', headers=headers)
+                if res:
+                    try:
+                        captchaJson = res.json()
+                        challengeDetails = captchaJson["challengeDetails"]
+                        sessionId = captchaJson["sessionId"]
+                        siteKey = captchaJson["siteKey"]
+                    except Exception:
+                        instance.scraper.logger.error("Error parsing captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+                    
+                    try:
+                        instance.scraper.logger.warn("Solving captcha")
+                        captchaResponse = solvecaptcha({
+                        "type":"recaptcha",
+                        "version":"2",
+                        "sitekey":siteKey,
+                        "url":response.url,
+                        "user-agent":instance.user_agent,
+                        "invisible":False
+                        })
+                        break
+                    except Exception:
+                        instance.scraper.logger.error("Error solving captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+            while True:
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+                }
+
+                duration = random.randint(5000,26000)
+                payload = {
+                    "challengeType": "recaptcha",
+                    "sessionId": sessionId,
+                    "challengeDetails": challengeDetails,
+                    "solution": captchaResponse["Data"],
+                    "stats":{
+                            "userAgent":instance.user_agent,
+                            "screen":"3456 x 2234",
+                            "browser":"Chrome",
+                            "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                            "isMobile":False,
+                            "os":os,
+                            "osVersion":osver,
+                            "cookiesEnabled":True,
+                            "tries":1,
+                            "duration":duration
+                        },
+                    "customerId": customerId,
+                    "eventId": eventId,
+                    "version": 6
+                }
+                
+                postCaptcha = instance.scraper.post(f"{origin}/challengeapi/verify", json=payload, headers=headers)
+                if postCaptcha:
+                    try:
+                        captchaJson = postCaptcha.json()
+                        isVerified = captchaJson["isVerified"]
+                        if isVerified:
+                            captchaSessionInfo = captchaJson["sessionInfo"]
+                            challengeSessions.append(captchaSessionInfo)
+                            break
+                        else:
+                            instance.scraper.logger.error("Error verifying captcha")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error verifying captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+
+        if "Recaptcha" in challenges:
+
+            headers = {
+                'sec-ch-ua': instance.sec_ch_ua,
+                'x-queueit-challange-eventid': eventId,
+                'x-queueit-challange-customerid': customerId,
+                'sec-ch-ua-mobile': '?0',
+                'user-agent': instance.user_agent,
+                'x-queueit-challange-userid': userId,
+                'x-queueit-challange-reason':'1',
+                'sec-ch-ua-platform': f'"{instance.platform}"',
+                'accept': '*/*',
+                'origin': origin,
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-dest': 'empty',
+                'referer': response.url,
+                'x-queueit-challange-hash': hash,
+                'accept-encoding': 'gzip, deflate, br',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            
+            while True:
+                instance.scraper.logger.log("Loading Captcha")
+                res = instance.scraper.post(origin + '/challengeapi/recaptchainvisible/challenge', headers=headers)
+                if res:
+                    try:
+                        captchaJson = res.json()
+                        challengeDetails = captchaJson["challengeDetails"]
+                        sessionId = captchaJson["sessionId"]
+                        siteKey = captchaJson["siteKey"]
+                    except Exception:
+                        instance.scraper.logger.error("Error parsing captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+                    
+                    try:
+                        instance.scraper.logger.warn("Solving captcha")
+                        captchaResponse = solvecaptcha({
+                        "type":"recaptcha",
+                        "version":"2",
+                        "sitekey":siteKey,
+                        "url":response.url,
+                        "user-agent":instance.user_agent,
+                        "invisible":True
+                        })
+                        if captchaResponse["Success"]:
+                            break
+                        else:
+                            instance.scraper.logger.error("Error solving captcha")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error solving captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+            while True:
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+                }
+
+                duration = random.randint(5000,26000)
+                payload = {
+                    "challengeType": "recaptcha-invisible",
+                    "sessionId": sessionId,
+                    "challengeDetails": challengeDetails,
+                    "solution": captchaResponse["Data"],
+                    "stats":{
+                            "userAgent":instance.user_agent,
+                            "screen":"3456 x 2234",
+                            "browser":"Chrome",
+                            "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                            "isMobile":False,
+                            "os":os,
+                            "osVersion":osver,
+                            "cookiesEnabled":True,
+                            "tries":1,
+                            "duration":duration
+                        },
+                    "customerId": customerId,
+                    "eventId": eventId,
+                    "version": 6
+                }
+
+                postCaptcha = instance.scraper.post(f"{origin}/challengeapi/verify", json=payload, headers=headers)
+                if postCaptcha:
+                    try:
+                        captchaJson = postCaptcha.json()
+                        isVerified = captchaJson["isVerified"]
+                        if isVerified:
+                            captchaSessionInfo = captchaJson["sessionInfo"]
+                            challengeSessions.append(captchaSessionInfo)
+                            break
+                        else:
+                            instance.scraper.logger.error("Error verifying captcha")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error verifying captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+        if "BotDetect" in challenges:
+            headers = {
+                'sec-ch-ua': instance.sec_ch_ua,
+                'x-queueit-challange-eventid': eventId,
+                'x-queueit-challange-hash': hash,
+                'x-queueit-challange-customerid': customerId,
+                'sec-ch-ua-mobile': '?0',
+                'user-agent': instance.user_agent,
+                'x-queueit-challange-userid': userId,
+                'x-queueit-challange-reason':'1',
+                'sec-ch-ua-platform': f'"{instance.platform}"',
+                'accept': '*/*',
+                'origin': origin,
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-dest': 'empty',
+                'referer': response.url,
+                'accept-encoding': 'gzip, deflate, br',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+
+            while True:
+                res = instance.scraper.post(origin + '/challengeapi/queueitcaptcha/challenge/en-gb', headers=headers)
+                if res:
+                    try:
+                        captchaJson = res.json()
+                        text = captchaJson["imageBase64"]
+                        challengeDetails = captchaJson["challengeDetails"]
+                        sessionId = captchaJson["sessionId"]
+                        meta = captchaJson["meta"]
+                        key = captchaJson["key"]
+                    except Exception:
+                        instance.scraper.logger.error("Error parsing captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+                    
+                    try:
+                        instance.scraper.logger.warn("Solving queue-it captcha")
+                        captchaResponse = solve_image_captcha(text)
+                        break
+                    except Exception:
+                        instance.scraper.logger.error("Error solving captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+            
+            while True:
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+
+                duration = random.randint(5000,26000)
+                    
+                json_data = {
+                        'challengeDetails': challengeDetails,
+                        'challengeType': 'botdetect',
+                        'customerId': customerId,
+                        'eventId': eventId,
+                        'sessionId': sessionId,
+                        'solution': captchaResponse,
+                        "stats":{
+                            "userAgent":instance.user_agent,
+                            "screen":"3456 x 2234",
+                            "browser":"Chrome",
+                            "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                            "isMobile":False,
+                            "os":os,
+                            "osVersion":osver,
+                            "cookiesEnabled":True,
+                            "tries":1,
+                            "duration":duration
+                        },
+                        'version': 6,
+                }
+
+                postCaptcha = instance.scraper.post(f'{origin}/challengeapi/verify', json=json_data, headers=headers)
+                if postCaptcha:
+                    try:
+                        captchaJson = postCaptcha.json()
+                        isVerified = captchaJson["isVerified"]
+                        if isVerified:
+                            captchaSessionInfo = captchaJson["sessionInfo"]
+                            challengeSessions.append(captchaSessionInfo)
+                            break
+                        else:
+                            instance.scraper.logger.error("Error verifying captcha")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error verifying captcha", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+        if "ProofOfWork" in challenges:
+            while True:
+                instance.scraper.logger.log("Requesting pow challenge")
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'x-queueit-challange-eventid': eventId,
+                    'powtag-userid': userId,
+                    'x-queueit-challange-customerid': customerId,
+                    'powtag-eventid': eventId,
+                    'powtag-customerid': customerId,
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'x-queueit-challange-userid': userId,
+                    'x-queueit-challange-reason':'1',
+                    'x-queueit-challange-hash': hash,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'accept': '*/*',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+                headers = {
+                        'authority': 'footlocker.queue-it.net',
+                        'accept': '*/*',
+                        'accept-language': 'de-DE,de;q=0.9',
+                        'origin': origin,
+                        'referer': response.url,
+                        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-platform': '"Windows"',
+                        'sec-fetch-dest': 'empty',
+                        'sec-fetch-mode': 'cors',
+                        'sec-fetch-site': 'same-origin',
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'x-queueit-challange-customerid': 'footlocker',
+                        'x-queueit-challange-eventid': eventId,
+                        'x-queueit-challange-hash': hash,
+                        'x-queueit-challange-reason': '1',
+                    }
+                requestPOW = instance.scraper.post(f"{origin}/challengeapi/pow/challenge/{userId}", headers=headers)
+                if requestPOW:
+                    try:
+                        powJson = requestPOW.json()
+                        challengeDetails = powJson["challengeDetails"]
+                        meta = powJson["meta"]
+                        sessionId = powJson["sessionId"]
+                        input = powJson["parameters"]["input"]
+                        zeroCount = powJson["parameters"]["zeroCount"]
+                        complexity = powJson["parameters"]["complexity"]
+                        runs = powJson["parameters"]["runs"]
+                        solution = QUEUEIT.getHash(input,zeroCount,runs,complexity)
+                        duration = random.randint(30,200)
+                        powChallenge = json.dumps(
+                            {
+                                "userId":userId,
+                                "meta":meta,
+                                "sessionId":sessionId,
+                                "solution":{"hash":solution},
+                                "tags":[
+                                    f"powTag-CustomerId:{customerId}",
+                                    f"X-Queueit-Challange-CustomerId:{customerId}",
+                                    f"powTag-EventId:{eventId}",
+                                    f"X-Queueit-Challange-EventId:{eventId}",
+                                    f"powTag-UserId:{userId}",
+                                    f"X-Queueit-Challange-UserId:{userId}"
+                                    ],
+                                "stats":{
+                                    "duration":duration,
+                                    "tries":1,
+                                    "userAgent":instance.user_agent,
+                                    "screen":"3456 x 2234",
+                                    "browser":"Chrome",
+                                    "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                                    "isMobile":False,
+                                    "os":os,
+                                    "osVersion":osver,
+                                    "cookiesEnabled":True
+                                    },
+                                "parameters":{
+                                    "type":"HashChallenge",
+                                    "input":input,
+                                    "runs":runs,
+                                    "complexity":complexity,
+                                    "zeroCount":zeroCount}
+                                    })
+                        encodedChallenge = base64.b64encode(powChallenge.encode('ascii')).decode('ascii')
+                        break
+                    except Exception:
+                        instance.scraper.logger.error("Error requesting pow challenge", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+            
+            while True:
+                instance.scraper.logger.log("Verifying pow challenge")
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+
+                payload = {
+                    "challengeType": "proofofwork",
+                    "challengeDetails": challengeDetails,
+                    "sessionId": sessionId,
+                    "solution": base64.b64encode(json.dumps({"hash":solution, "type":"HashChallenge"}, separators=(',', ':')).encode('ascii')).decode('ascii'),
+                    "stats":{
+                            "userAgent":instance.user_agent,
+                            "screen":"3456 x 2234",
+                            "browser":"Chrome",
+                            "browserVersion":instance.user_agent.split("Chrome/")[1].split(" ")[0],
+                            "isMobile":False,
+                            "os":os,
+                            "osVersion":osver,
+                            "cookiesEnabled":True,
+                            "tries":1,
+                            "duration":duration
+                        },
+                    "customerId": customerId,
+                    "eventId": eventId,
+                    "version": 6
+                }
+
+                postPOW = instance.scraper.post(f"{origin}/challengeapi/verify", json=payload, headers=headers)
+                if postPOW:
+                    try:
+                        powJson = postPOW.json()
+                        isVerified = powJson["isVerified"]
+                        if isVerified:
+                            powSessionInfo = powJson["sessionInfo"]
+                            challengeSessions.append(powSessionInfo)
+                            break
+                        else:
+                            instance.scraper.logger.error("Error verifying pow")
+                            time.sleep(getRetryDelay())
+                            continue
+                    except Exception:
+                        instance.scraper.logger.error("Error verifying pow", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                        time.sleep(getRetryDelay())
+                        continue
+
+        while True:
+            instance.scraper.logger.log("Requesting queue position")
+
+            if "scv" in response.url:
+                referral = f"https://footlocker.queue-it.net/softblock/?c={customerId}&e={eventId}&t={target}&cid=en-GB&rticr=0"
+            else:
+                referral = f"{origin}/"
+                
+            headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    "x-queueit-qpage-referral": referral,
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+
+            if "enqueuetoken" in response.url:
+                enqueueToken = response.url.split("enqueuetoken=")[1].split("&")[0]
+
+                payload = {
+                    "challengeSessions": challengeSessions,
+                    "layoutName": layout,
+                    "customUrlParams": "",
+                    "targetUrl": target,
+                    "Referrer": referral,
+                    "QueueitEnqueueToken": enqueueToken
+                    }
+
+            else:
+                payload = {
+                        "challengeSessions": challengeSessions,
+                        "layoutName": layout,
+                        "customUrlParams": "",
+                        "targetUrl": target,
+                        "Referrer": referral
+                    }
+
+            if "scv" in response.url:
+                params = {
+                    "cid": "en-GB",
+                    "scv": json.dumps(scv)
+                }
+            else:
+                params = {
+                    "cid": "en-GB"
+                }
+
+            requestQueue = instance.scraper.post(f"{origin}/spa-api/queue/{customerId}/{eventId}/enqueue", json=payload, params=params, headers=headers)
+            if requestQueue:
+                try:
+                    queueJson = requestQueue.json()
+                    if queueJson["redirectUrl"]:
+                        if "softblock" in queueJson["redirectUrl"]:
+                            instance.scraper.logger.warn("Softblock detected")
+                            response , scv = QUEUEIT.softblock(instance, session, response, eventId, customerId, userId, origin, target, os, osver, layout=layout)
+                            continue
+                    queueId = queueJson["queueId"]
+                    break
+                except Exception:
+                    instance.scraper.logger.error("Error requesting queue position", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+                    continue
+        
+        firstTime = True
+        seid = QUEUEIT.guid()
+        sets = int(time.time()*1000)
+        while True:
+            time.sleep(2)
+            instance.scraper.logger.log("Polling")
+
+            if firstTime or customerId == "wax":
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'content-type': 'application/json',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+
+            else:
+
+                headers = {
+                    'sec-ch-ua': instance.sec_ch_ua,
+                    'sec-ch-ua-mobile': '?0',
+                    'user-agent': instance.user_agent,
+                    'content-type': 'application/json',
+                    'accept': 'application/json, text/javascript, */*; q=0.01',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'x-queueit-queueitem-v1': x_queueit_queueitem_v1,
+                    'sec-ch-ua-platform': f'"{instance.platform}"',
+                    'origin': origin,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': response.url,
+                    'accept-encoding': 'gzip, deflate, br',
+                    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+            
+            payload = {
+                "targetUrl": target,
+                "customUrlParams": "",
+                "layoutVersion": layoutVersion,
+                "layoutName": layout,
+                "isClientRedayToRedirect": True,
+                "isBeforeOrIdle": False
+            }
+
+            poll = instance.scraper.post(f"{origin}/spa-api/queue/{customerId}/{eventId}/{queueId}/status?&l={layout}&seid={seid}&sets={sets}&cid=en-GB", json=payload, headers=headers)
+            if poll:
+                try:
+                    pollJson = poll.json()
+                    if "redirectUrl" in pollJson:
+                        redirectUrl = pollJson["redirectUrl"]
+                        if "afterevent.aspx" in redirectUrl:
+                            instance.scraper.logger.warn("Release finished")
+                            sys.exit()
+                        if "softblock" in redirectUrl:
+                            instance.scraper.logger.warn("Softblock Detected")
+                            QUEUEIT.softblock(instance, session, response, eventId, customerId, userId, origin, target, os, osver, queueId=queueId, layout=layout)
+                            continue
+                        if "/" == redirectUrl[0]:
+                            time.sleep(getRetryDelay())
+                            continue
+                        instance.scraper.logger.success("Queue passed!")
+                        return redirectUrl
+                    else:
+                        if firstTime:
+                            if customerId != "wax":
+                                x_queueit_queueitem_v1 = poll.headers["x-queueit-queueitem-v1"]
+                            firstTime = False
+                        secondsToStart = pollJson["ticket"]["secondsToStart"]
+                        if secondsToStart > 0:
+                            instance.scraper.logger.log(f"Release starts in : {secondsToStart}s")
+                        else:
+                            progress = int(pollJson["ticket"]["progress"] * 100)
+                            instance.scraper.logger.log(f"Progress [{progress}%]")
+                        updateInterval = pollJson["updateInterval"]
+                        time.sleep(updateInterval/1000)
+                        continue
+                except Exception:
+                    instance.se.logger.error("Error polling queue position", log_message=f"QueueIT | handleQueue Error: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+                    continue
+
+    @staticmethod
+    def getHash(input, zeroCount, runs, complexity):
+        zeros = "0" * complexity
+        postfix = 0
+        a = []
+        for _ in range(runs):
+            while True:
+                postfix += 1
+                stri = input + str(postfix)
+                encodedHash = hashlib.sha256(stri.encode()).hexdigest()
+                if encodedHash.startswith(zeros):
+                    a.append({"hash":encodedHash,"postfix":postfix})
+                    break
+        return a
+
+    @staticmethod
+    def e():
+        return hex(math.floor(65536 * (1 + random.random()))).lstrip('0x')[1:]
+
+    @staticmethod
+    def guid():
+        return QUEUEIT.e()+QUEUEIT.e()+"-"+QUEUEIT.e()+"-"+QUEUEIT.e()+"-"+QUEUEIT.e()+"-"+QUEUEIT.e()+QUEUEIT.e()+QUEUEIT.e()

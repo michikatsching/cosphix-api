@@ -1,0 +1,746 @@
+import traceback
+import jwt,re
+from collections import OrderedDict
+try:
+    from ..functions.monitor import *
+except ImportError: 
+    from functions.monitor import *
+
+try:
+    from ..functions.settings import *
+except ImportError: 
+    from functions.settings import *
+
+try:
+    from ..functions.aboutyou_payload import *
+except ImportError: 
+    from functions.aboutyou_payload import *
+try:
+    from ..functions.captcha import *
+except ImportError: 
+    from functions.captcha import *
+try:
+    from ..functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+try:
+    from ..functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+
+
+URL = ""
+apitasks = []
+
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":False},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+class ABOUTYOU():
+    def __init__(self,data):
+        try:
+            self.titelbar = MODULETITEL({"store":"ABOUTYOU","values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.tasknumber = data["tasknumber"]
+            self.mode = data["MODE"]
+            proxies = data["proxy"]
+            self.discordID = data["discordid"]
+            self.url = data["URL"]
+            self.payment_method = data["PAYMENT_METHOD"]
+            self.profile_name = data["PROFILE"]
+            self.email = data["ACCOUNT_EMAIL"]
+            self.password = data["ACCOUNT_PASSWORD"]
+            self.firstname = data["FIRSTNAME"]
+            self.lastname = data["LASTNAME"]
+            self.address1 = data["STREET_1"]
+            self.webhook = str(data["WEBHOOK"]).strip()
+            self.address2 = data["STREET_2"]
+            self.postalcode = data["ZIPCODE"]
+            self.housenumber = data["HOUSENUMBER"]
+            self.size = data["SIZE"]
+            self.city = data["CITY"]
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except:
+                self.profile_webhook = ""
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            self.countryCode = data["COUNTRY_ISO"]
+            self.discountCode = data["DISCOUNT_CODE"]
+            shopIds = {
+                "DE": 139,
+                "PL": 550,
+                "CZ": 554,
+                "AT": 200,
+                "BE": 558,
+                "FR": 658,
+                "IT": 671,
+                "ES": 670,
+                "NL": 545,
+                "SK": 617,
+                "RO": 594,
+                "DK": 654,
+                "CH": 431
+            }
+            try:
+                self.shopId = shopIds[self.countryCode]
+            except:
+                print(f"Country not Supported | {self.countryCode}")
+                sys.exit()
+            self.payloadGen = AboutYouGenerator(self.countryCode)
+            self.countryCode = str(self.countryCode).lower()
+            
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module=f"ABOUTYOU {self.countryCode.upper()}",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = random.choice(self.scraper.user_agents)
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            if str(self.url).strip().lower() == "api":
+                self.web_socket()
+            self.scraper.set_proxy()
+            self.login()
+            threading.Thread(target=self.refreshSession, args=[]).start()
+            self.clearCart()
+            self.webhookMode = "Normal"
+            if str(self.mode).strip().lower() == "preload":
+                self.webhookMode = "Preload"
+                self.loadProduct(dummy=True)
+                self.addToCart()
+                self.loadCheckout()
+                self.clearCart()
+            self.loadProduct()
+            self.addToCart()
+            if str(self.mode).strip().lower() != "preload":
+                self.loadCheckout()
+            if str(self.discountCode).strip() != "":
+                self.discountCode()
+            if str(self.payment_method).lower().strip() in ["paypal","pp",""]:
+                self.paypal()
+            self.cod()
+            sys.exit()
+        except Exception as e :
+            print(f"Error - {e}")
+            time.sleep(15)
+            sys.exit()
+            pass
+    def injection(self, session : requests.session, response :requests.Response):
+        
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "https://api.aboutyou.com/customer/me" in response.url:
+            return response
+
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code == 418:
+            return "Captcha"
+
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+        
+    def web_socket(self):
+        global URL
+        apitasks.append(str(self.tasknumber).strip())
+        import websocket
+        from websocket import create_connection
+        self.scraper.logger.warn("Connected to API")
+        while True:
+            if int(self.tasknumber) == int(min(apitasks)):
+                try:
+                    ws =  create_connection("wss://cosphix.herokuapp.com")
+                    message = ws.recv()
+                    if str(json.loads(message)["action"]).strip().lower() == "apisignal":
+                        if str(json.loads(message)["store"]).strip().lower() == "aboutyou":
+                            self.url = str(json.loads(message)["url"]).strip()
+                            self.scraper.logger.success("Got restock Signal")
+                            URL = self.url
+                            ws.close()
+                            break
+                except websocket._exceptions.WebSocketConnectionClosedException:
+                    pass
+            else:
+                if URL != "":
+                    self.url = URL
+                    break
+    def randomstring(self,_len: int):
+            return "".join(str(random.randint(1, 9)) for i in range(_len))
+
+    def refreshSession(self):
+        time.sleep(300)
+        while True:
+            account = self.scraper.get(f"https://api.aboutyou.com/customer/me?include=meta&shopId={self.shopId}&forceNonLegacySuffix=true")
+            if account:
+                if "@" not in account.json()["data"]["attributes"]["email"]:
+                    self.login()
+                    time.sleep(300)
+
+    def login(self):
+        self.scraper.logger.log("Getting Login Page")
+        
+        self.scraper.session.headers = OrderedDict([
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('x-grpc-web', '1'),
+            ('content-type', 'application/grpc-web+proto'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent',self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+
+
+
+        data = self.payloadGen.login(email=self.email,password=self.password)
+        while True:
+            login = self.scraper.post("https://grips-web.aboutyou.com/checkout.CheckoutV1/logInWithEmail", data=data)
+            if login:
+                try:
+                    try:
+                        self.checkoutSid = re.findall('ey\w+%3D%3D', login.text)[0]
+                    except:
+                        try:
+                            self.checkoutSid = re.findall('ey\w+%3D', login.text)[0]
+                        except:
+                            self.checkoutSid = re.findall('ey\w+', login.text)[0]
+                    self.apiToken = re.findall('\w+-\w+-\w+-\w+-\w+', login.text)[0]
+                    self.token = re.findall('\x12(\w+)\x12', login.text)[0]
+                    self.scraper.logger.success("Logged in")
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error logging in - {e}",log_message=f"{str(self.scraper.module).strip().lower()} | Error logging in: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+    
+    def clearCart(self):
+        self.scraper.session.headers = OrderedDict([
+            ('host', 'api.aboutyou.com'),
+            ('connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('accept', 'application/json, text/plain, */*'),
+            ('x-auth-token', self.apiToken),
+            ('content-type', 'application/json'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('user-agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+
+        while True:
+            getCart = self.scraper.get(f"https://api.aboutyou.com/user/me/basket/bapi?with=items.product.attributes,items.product.variants,items.product.images.attributes:legacy(false),items.product.priceRange,items.variant.attributes&shopId={self.shopId}&campaignKey=37&sId={self.apiToken}")
+            if getCart:
+                items = getCart.json()["items"]
+                break
+        if len(items) != 0:
+            for item in items:
+                while True:
+                    deleteItem = self.scraper.delete(f"https://api.aboutyou.com/user/me/basket/bapi/{item['key']}?with=items.product.attributes:key(name%7Cbrand%7Ccolor%7CcolorDetail%7CassortmentType),items.product.images.attributes:legacy(false):key(imageNextDetailLevel%7CimageBackground%7CimageFocus%7CimageGender%7CimageType%7CimageView),items.variant.attributes:key(vendorSize%7CshopSize%7Ccupsize%7Clength%7Cdimension3)&shopId={self.shopId}&forceNonLegacySuffix=true")
+                    if deleteItem:
+                        break
+                    else:
+                        break
+        
+
+    def loadProduct(self, dummy=False):
+        sizeFound = False
+        
+        if not dummy:
+            if "http" in self.url:
+                self.products = [self.url.split('-')[-1]]
+            else:
+                if len(self.url.split(',')) > 1:
+                    self.products = self.url.split(',')
+                else:
+                    self.products = [self.url]
+        
+            self.productsStr = ",".join(self.products)
+        self.scraper.session.headers = OrderedDict([
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'),
+            ('cache-control', 'no-cache'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('user-agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        if dummy:
+            self.scraper.logger.log("Getting dummy Product")
+            
+        else:
+            self.scraper.logger.log("Getting Product(s)")
+            
+        
+        while True:
+            if dummy:
+                params = (
+                    ('with', f'attributes:key(brand|brandLogo|brandAlignment|name|quantityPerPack|plusSize|colorDetail|sponsorBadge|sponsoredType|maternityNursing|exclusive|genderage|specialSizesProduct|materialStyle|sustainabilityIcons|assortmentType|dROPS|brandCooperationBadge|secondHandType|{self.randomstring(50)}),advancedAttributes:key(materialCompositionTextile|siblings),variants,variants.attributes:key(shopSize|categoryShopFilterSizes|cup|cupsize|vendorSize|length|dimension3|sizeType|sort),images.attributes:legacy(false):key(imageNextDetailLevel|imageBackground|imageFocus|imageGender|imageType|imageView),priceRange'),
+                    ('campaignKey', '00'),
+                    ('forceNonLegacySuffix', 'true'),
+                    ('shopId', self.shopId),
+                )
+            else:
+                monitor = MONITOR({
+                    "store":self.scraper.module,
+                    "product":str(self.productsStr),
+                    "tasknumber":self.scraper.taskcount
+                })
+                params = (
+                    ('ids', self.productsStr),
+                    ('with', f'attributes:key(brand|brandLogo|brandAlignment|name|quantityPerPack|plusSize|colorDetail|sponsorBadge|sponsoredType|maternityNursing|exclusive|genderage|specialSizesProduct|materialStyle|sustainabilityIcons|assortmentType|dROPS|brandCooperationBadge|secondHandType|{self.randomstring(50)}),advancedAttributes:key(materialCompositionTextile|siblings),variants,variants.attributes:key(shopSize|categoryShopFilterSizes|cup|cupsize|vendorSize|length|dimension3|sizeType|sort),images.attributes:legacy(false):key(imageNextDetailLevel|imageBackground|imageFocus|imageGender|imageType|imageView),priceRange'),
+                    ('campaignKey', '00'),
+                    ('forceNonLegacySuffix', 'true'),
+                    ('shopId', self.shopId),
+                )
+            getProduct = self.scraper.get(f'https://api-cloud.aboutyou.de/v1/products', params=params)
+            
+            if getProduct:
+                if dummy:
+                    while sizeFound == False:
+                        randomProduct = random.choice(getProduct.json()["entities"])
+                        self.variant = random.choice(randomProduct["variants"])
+                        if self.variant["stock"]["quantity"] > 0:
+                            self.variant = self.variant["id"]
+                            self.id = randomProduct["id"]
+                            sizeFound = True
+                    self.scraper.logger.log("Got dummy Product")
+                    break
+                else:
+                    inStockProducts = []
+                    for p in getProduct.json()["entities"]:
+                        if not p["isSoldOut"]:
+                            inStockProducts.append(p)
+                    if len(inStockProducts) > 0:
+                        product = random.choice(inStockProducts)
+                        self.id = product["id"]
+                        self.url = f"https://www.aboutyou.{self.countryCode}/p/-/--{self.id}"
+                        self.productName = f"{product['attributes']['brand']['values']['label']} {product['attributes']['name']['values']['label']}"
+                        self.productImage = f"https://cdn.aboutstatic.com/file/{product['images'][0]['hash']}"
+                        sizes = product["variants"]
+                        sizesInStock = [s for s in sizes if s["stock"]["quantity"] > 0]
+                        if len(sizesInStock) > 0:
+                            selectedSize = random.choice(sizesInStock)
+                            self.productSize = str(selectedSize["attributes"]["shopSize"]["values"][0]["label"])
+                            self.productPrice = str(selectedSize["price"]["withTax"] / 100)
+                            self.variant = selectedSize["id"]
+                            sizeFound = True
+                        if sizeFound:
+                            self.scraper.logger.log("Got Product(s)")
+                            monitor.instock()
+                            break
+                    else:
+                        if monitor.is_monitor():
+                            self.scraper.logger.warn("Product(s) out of stock")
+                            self.scraper.set_proxy()
+                            time.sleep(getRetryDelay())
+                            continue
+                        else:
+                            self.scraper.logger.warn("Product(s) OOS, switching to passiv Mode")
+                            while monitor.is_live() == False:
+                                time.sleep(3)
+                            continue
+
+    
+    def addToCart(self):
+        self.scraper.logger.log("Adding Product to Cart")
+        self.scraper.session.headers = OrderedDict([
+            ('host', 'api.aboutyou.com'),
+            ('connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('accept', 'application/json, text/plain, */*'),
+            ('x-auth-token', self.apiToken),
+            ('content-type', 'application/json'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('user-agent', self.user_agent),
+            ('origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        json_data = {
+                "variantId":self.variant,
+                "quantity":1,
+                "customData":{
+                    "variantId":self.variant,
+                    "productId":self.id,
+                    "sponsoredType":"sponsored",
+                    "sortingChannel":None,
+                    "linkedContentType":None,
+                    "linkedContentId":None,
+                    "originDevice":"mobile"
+                },
+                "shopId":self.shopId
+            }
+
+        while True:
+            add = self.scraper.post(f"https://api.aboutyou.com/user/me/basket/bapi?with=items.product.attributes,items.product.variants,items.product.images.attributes:legacy(false),items.product.priceRange,items.variant.attributes&shopId={self.shopId}&sId={self.apiToken}", json=json_data)
+            if add and add != "Captcha":
+                print(add.json())
+                input()
+                if add.json()["items"][0]["quantity"] == 1:
+                    self.titelbar("carts")
+                    self.scraper.logger.success("Added to Cart")
+                    break
+                else:
+                    self.scraper.logger.error("Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {add.json()}")
+                    time.sleep(getRetryDelay())
+            elif add == "Captcha":
+                self.scraper.logger.magenta("Getting Captcha")
+                while True:
+                    try:
+                        token = helheim.turnstile(self.scraper, f'https://www.aboutyou.{self.countryCode}/', "0x4AAAAAAAAjQZs3okJpHXao")
+                        if token:
+                            self.scraper.session.headers['x-captcha-code'] = token
+                            break
+                        else:
+                            self.scraper.logger.error("Captcha Error")
+                            time.sleep(getRetryDelay())
+                    except Exception as e:
+                        self.scraper.logger.error("Captcha Error")
+                        time.sleep(getRetryDelay())
+
+
+        
+    def loadCheckout(self):
+        self.scraper.session.headers = OrderedDict([
+            ('host', f'checkout.aboutyou.{self.countryCode}'),
+            ('connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('sec-ch-ua-mobile', '?0'),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('user-agent', self.user_agent),
+            ('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        self.scraper.logger.log("Getting Checkout")
+        while True:
+            getSession = self.scraper.get(f"https://checkout.aboutyou.{self.countryCode}/api/session/{self.checkoutSid}")
+            if getSession: break
+        self.scraper.session.headers = OrderedDict([
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('x-grpc-web', '1'),
+            ('content-type', 'application/grpc-web+proto'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://www.aboutyou.{self.countryCode}/cart'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        data = self.payloadGen.checkoutUrl(eyCookie=self.checkoutSid,apiToken=self.apiToken,Token=self.token+"0")
+        while True:
+            getCheckoutUrl = self.scraper.post("https://grips-web.aboutyou.com/checkout.CheckoutV1/getCheckoutUrl", data=data)
+            if getCheckoutUrl:
+                try:
+                    self.checkoutUrl = re.findall('(?:(?:https?|ftp):\/\/)?[\w/\-?=%.]+\.[\w/\-&?=%.]+', getCheckoutUrl.text)[0]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error getting CheckoutURL - {e}",log_message=f"{str(self.scraper.module).strip().lower()} | CheckoutURL: {getCheckoutUrl.status_code}")
+                    time.sleep(getRetryDelay())
+        while True:
+            getCheckout = self.scraper.get(self.checkoutUrl)
+            if getCheckout:
+                break
+        self.scraper.session.headers = OrderedDict([
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.user_agent}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout-v3.aboutyou.{self.countryCode}/order/data/billing-address'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        while True:
+            getCheckoutUrl = self.scraper.get(f"https://checkout-v3.aboutyou.{self.countryCode}/api/co/v3/state/config")
+            if getCheckoutUrl:
+                
+                try:
+                    self.secret = getCheckoutUrl.json()["session"]["jwtSecret"]
+                    break
+                except:
+                    self.scraper.logger.error(f"Error getting Checkout token",log_message=f"{str(self.scraper.module).strip().lower()} | CheckoutSecret: {getCheckoutUrl.status_code}")
+                    time.sleep(getRetryDelay())
+        
+        self.scraper.logger.log("Got Checkout")
+
+    def paypal(self):
+        self.scraper.logger.log("Submitting Checkout")
+        headers = {
+            'Host': f'checkout-v3.aboutyou.{self.countryCode}',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'x-correlation-id': 'GA1.2.1219262594.1691662538|undefined',
+            'x-signature': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkdGEiOiJkMDg4NzU3MDQ0YTRhNmQyY2U0NGEzMWFhMmRiOThjYzA0ZmRjYmZlMTMyNzkyMDc5NWU1NDI4MzNjYmFhNTE3In0.12Y_FePYv9PL4LtsWiPdG0YFEeX9dxshGGGhLvBBAlE',
+            'sec-ch-ua-mobile': '?0',
+            'user-agent': self.user_agent,
+            'content-type': 'application/json',
+            'x-session': 'eyJpdiI6Im1cL014N1U4Y3Z1Q1dISmNSNCtHN2hBPT0iLCJ2YWx1ZSI6IkliSmhCc3pOaDBobVFMeVwvVktnWWozNDUwdUg5T1AwTVE5dWVVTU1cL2VcL2VGN0VZME1ldklKY2NJSm5UaXVPZUlXU1RwUldYSmYrcDBaY3V1UU9oT2FZU25DVTRZZXZ3NWpZTHBRS3RTaXFidFY1OEsxTU05WEhUWGg3M1JTSkxBIiwibWFjIjoiNTJlMGFiYjZlNmFjOWVjYjU0YTRiOGNmNDg2M2RlNjUzMjM5MTkzZWExMDM5OTUwNzQzNTljYWEzNGU0YzYzYiJ9',
+            'x-shop-id': str(self.shopId),
+            'sec-ch-ua-platform': f'{self.ua_platform}',
+            'accept': '*/*',
+            'origin': f'https://www.aboutyou.{self.countryCode}',
+            'sec-fetch-site': 'same-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': f'https://www.aboutyou.{self.countryCode}/',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        json_data = {
+            'data': {
+                'paymentOptionKey': 'paypal_instant',
+            },
+            'referer': f'https://www.aboutyou.{self.countryCode}/checkout',
+        }
+        while True:
+            postPayment = self.scraper.post(f"https://checkout-v3.aboutyou.{self.countryCode}/api/co/v3/state/order/confirmation/execute", json=json_data,headers=headers)
+            if postPayment:
+                break
+        self.scraper.logger.success("Successful Checkout!")
+        self.titelbar("success")
+        self.titelbar("-carts")
+        webhook_private({
+            "Store":f"||ABOUTYOU {self.countryCode.upper()}||",
+            "Product":f"{self.productName}",
+            "Size":f"{self.productSize}",
+            "Price":f"{self.productPrice} €",
+            "Payment Method":"PayPal",
+            "Mode":f"{self.webhookMode}",
+            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+            "discordid":self.discordID
+            },img=self.productImage,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper.session,postPayment.json()["orderConfirmation"]["redirect"]["url"]),product_url=self.url)
+        webhook_public({
+            "Store":f"||ABOUTYOU {self.countryCode.upper()}||",
+            "Item":f"{self.productName}",
+            "Item Size":f"{self.productSize}",
+            "Price":f"{self.productPrice} €",
+            "Payment Method":"PayPal",
+            "Mode":f"{self.webhookMode}",
+            "Task Input": self.products,
+            }
+            ,img=self.productImage,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=aboutyou&url={self.url})")
+        sys.exit()
+    def discount(self):
+        payload = {
+            "code":self.discountCode
+            }
+
+        signature = jwt.encode(
+            {"qry":"b0dc58e755205f7271f0e6a6e903158a","dta":""},
+            self.secret,
+            algorithm="HS256",
+            headers={"alg":"HS256","typ":"JWT"},
+            )
+
+        self.scraper.session.headers = OrderedDict([
+            ('Host', f'checkout-v3.aboutyou.{self.countryCode}'),
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('X-SIGNATURE', signature),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('Content-Type', 'application/json'),
+            ('X-BROWSER-TAB-ID', self.randomstring(32)),
+            ('X-SOURCE', 'order-confirmation'),
+            ('X-DEVICE', 'desktop'),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://checkout-v3.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'same-origin'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout-v3.aboutyou.{self.countryCode}/order/confirmation'),
+            ('Accept-Encoding', 'gzip, deflate, br'),
+            ('Accept-Language', 'de-DE,de;q=0.9')
+        ])
+        self.scraper.logger.log("Submitting Discount Code")
+        COUNT = 0
+        while COUNT != 3:
+            postDiscount = self.scraper.post(f"https://checkout-v3.aboutyou.{self.countryCode}/api/voucher?isMobileApp=false", json=payload)
+            if postDiscount: 
+                break
+            else:
+                COUNT += 1
+    def cod(self):
+        payload = {
+            "key":f"{self.countryCode}_cod",
+            "status":{"isSelected":True}
+            }
+
+        signature = jwt.encode(
+            {"qry":"","dta":""},
+            self.secret,
+            algorithm="HS256",
+            headers={"alg":"HS256","typ":"JWT"},
+            )
+        self.scraper.session.headers = OrderedDict([
+            ('Host', f'checkout-v3.aboutyou.{self.countryCode}'),
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('X-SIGNATURE', signature),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('Content-Type', 'application/json'),
+            ('X-BROWSER-TAB-ID', self.randomstring(32)),
+            ('X-SOURCE', 'order-confirmation'),
+            ('X-DEVICE', 'desktop'),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://checkout-v3.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'same-origin'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout-v3.aboutyou.{self.countryCode}/order/confirmation'),
+            ('Accept-Encoding', 'gzip, deflate, br'),
+            ('Accept-Language', 'de-DE,de;q=0.9')
+        ])
+        self.scraper.logger.log("Submitting Payment")
+        while True:
+            postPayment = self.scraper.post(f"https://checkout-v3.aboutyou.{self.countryCode}/api/payment", json=payload)
+            if postPayment:
+                break
+        self.scraper.logger.log("Submitted Payment")
+        signature = jwt.encode(
+            {"qry":"","dta":""},
+            self.secret,
+            algorithm="HS256",
+            headers={"alg":"HS256","typ":"JWT"},
+            )
+        self.scraper.session.headers = OrderedDict([
+            ('Host', f'checkout-v3.aboutyou.{self.countryCode}'),
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.ua_platform),
+            ('X-SIGNATURE', signature),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('Content-Type', 'application/json'),
+            ('X-BROWSER-TAB-ID', self.randomstring(32)),
+            ('X-SOURCE', 'order-confirmation'),
+            ('X-DEVICE', 'desktop'),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://checkout-v3.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'same-origin'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout-v3.aboutyou.{self.countryCode}/order/confirmation'),
+            ('Accept-Encoding', 'gzip, deflate, br'),
+            ('Accept-Language', 'de-DE,de;q=0.9')
+        ])
+        self.scraper.logger.log("Submitting Checkout")
+        while True:
+            getCOD = self.scraper.get(f"https://checkout-v3.aboutyou.{self.countryCode}/api/payment/url")
+            if getCOD:
+                try:
+                    break
+                except:
+                    self.scraper.logger.error(f"Error submitting Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | CheckoutSecret: {getCOD.text}")
+                    time.sleep(getRetryDelay())
+        try:
+            if "success" in getCOD.json()["url"]:
+                self.scraper.logger.success("Checked out!")
+                self.titelbar("success")
+                self.titelbar("-carts")
+                webhook_private({
+                                "Store":f"AboutYou {self.countryCode.upper()}",
+                                "Product":self.productName,
+                                "Price":self.productPrice,
+                                "Size":self.size,
+                                "Payment Method":"COD",
+                                "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                                "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                                "discordid":self.discordID
+                                },img=self.productImage,success=False,profile_webhook=self.profile_webhook,product_url=self.url)
+                sys.exit()
+            else:
+                self.scraper.logger.error("Checkout Failed!")
+                webhook_private({
+                    "Store":f"||{str('AboutYou').upper()} {self.countryCode.upper()}||",
+                    "Product":self.productName,
+                    "Price":f"{self.productPrice} â‚¬",
+                    "Payment Method":"COD",
+                    "Size":f"{self.size}",
+                    "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                    "discordid":self.discordID,
+                    },img="http://cosphix.com/proxy?url="+self.productImage,success=False,profile_webhook=self.webhook,title="Failed Checkout!")
+                self.titelbar("-carts")
+                self.titelbar("failed")
+                sys.exit()
+        except:
+            self.scraper.logger.error("Checkout Failed!")
+            webhook_private({
+                    "Store":f"||{str('AboutYou').upper()} {self.countryCode.upper()}||",
+                    "Product":self.productName,
+                    "Price":f"{self.productPrice} â‚¬",
+                    "Payment Method":"COD",
+                    "Size":f"{self.size}",
+                    "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                    "discordid":self.discordID,
+                    },img="http://cosphix.com/proxy?url="+self.productImage,success=False,profile_webhook=self.webhook,title="Failed Checkout!")
+            self.titelbar("-carts")
+            self.titelbar("failed")
+            sys.exit()

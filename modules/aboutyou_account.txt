@@ -1,0 +1,403 @@
+import traceback
+import jwt,re
+from collections import OrderedDict
+try:
+    from ..functions.monitor import *
+except ImportError: 
+    from functions.monitor import *
+
+try:
+    from ..functions.settings import *
+except ImportError: 
+    from functions.settings import *
+
+try:
+    from ..functions.aboutyou_payload import *
+except ImportError: 
+    from functions.aboutyou_payload import *
+try:
+    from ..functions.captcha import *
+except ImportError: 
+    from functions.captcha import *
+try:
+    from ..functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+try:
+    from ..functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":False},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+
+class ABOUTYOUGEN():
+    def __init__(self,data):
+        try:
+            self.titelbar = MODULETITEL({"store":"ABOUTYOU ACC GEN","values": ["Task(s)","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            self.discordID = data["discordid"]
+            self.profile_name = data["PROFILE"]
+            self.firstname = data["FIRSTNAME"]
+            self.lastname = data["LASTNAME"]
+            self.address1 = data["STREET_1"]
+            self.webhook = str(data["WEBHOOK"]).strip()
+            self.address2 = data["STREET_2"]
+            self.postalcode = data["ZIPCODE"]
+            self.housenumber = data["HOUSENUMBER"]
+            self.city = data["CITY"]
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except:
+                self.profile_webhook = ""
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            self.countryCode = data["COUNTRY_ISO"]
+            shopIds = {
+                "DE": 139,
+                "PL": 550,
+                "CZ": 554,
+                "AT": 200,
+                "BE": 558,
+                "FR": 658,
+                "IT": 671,
+                "ES": 670,
+                "NL": 545,
+                "SK": 617,
+                "RO": 594,
+                "DK": 654,
+                "CH": 431
+            }
+            try:
+                self.shopId = shopIds[self.countryCode]
+            except:
+                print(f"Country not Supported | {self.countryCode}")
+                sys.exit()
+            self.payloadGen = AboutYouGenerator(self.countryCode)
+            self.countryCode = str(self.countryCode).lower()
+            
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module=f"ABOUTYOU {self.countryCode.upper()}",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = random.choice(self.scraper.user_agents)
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            
+            self.scraper.set_proxy()
+            
+            self.Account()
+            
+        except Exception as e :
+            print(f"Error - {e}")
+            time.sleep(15)
+            sys.exit()
+            pass
+    def injection(self, session : requests.session, response :requests.Response):
+        
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "https://api.aboutyou.com/customer/me" in response.url:
+            return response
+
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code == 418:
+            return "Captcha"
+
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+
+    def Account(self):
+        self.scraper.session.headers = OrderedDict([
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('x-grpc-web', '1'),
+            ('content-type', 'application/grpc-web+proto'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent',self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        self.password = generatePassword()
+        data = self.payloadGen.register(email=self.email,password=self.password,name=self.firstname,lastname=self.lastname)
+        self.scraper.logger.log("Creating Account")
+        while True:
+            login = self.scraper.post("https://grips-web.aboutyou.com/checkout.CheckoutV1/registerWithEmail", data=data)
+            if login:
+                try:
+                    try:
+                        self.checkoutSid = re.findall('ey\w+%3D%3D', login.text)[0]
+                    except:
+                        try:
+                            self.checkoutSid = re.findall('ey\w+%3D', login.text)[0]
+                        except:
+                            self.checkoutSid = re.findall('ey\w+', login.text)[0]
+                    self.apiToken = re.findall('\w+-\w+-\w+-\w+-\w+', login.text)[0]
+                    self.token = re.findall('\x12(\w+)\x12', login.text)[0]
+                    self.scraper.logger.success("Account created")
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error creating Account - {e}",log_message=f"{str(self.scraper.module).strip().lower()} | Error creating Account {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+    
+    def loadProduct(self):
+        sizeFound = False
+        self.scraper.headers = OrderedDict([
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'),
+            ('cache-control', 'no-cache'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent',self.user_agent),
+            ('sec-ch-ua-platform', f'"{self.ua_platform}"'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+
+        self.scraper.logger.log("Loading dummy")
+            
+        
+        while True:
+            params = (
+                    ('with', f'attributes:key(brand|brandLogo|brandAlignment|name|quantityPerPack|plusSize|colorDetail|sponsorBadge|sponsoredType|maternityNursing|exclusive|genderage|specialSizesProduct|materialStyle|sustainabilityIcons|assortmentType|dROPS|brandCooperationBadge|secondHandType),advancedAttributes:key(materialCompositionTextile|siblings),variants,variants.attributes:key(shopSize|categoryShopFilterSizes|cup|cupsize|vendorSize|length|dimension3|sizeType|sort),images.attributes:legacy(false):key(imageNextDetailLevel|imageBackground|imageFocus|imageGender|imageType|imageView),priceRange'),
+                    ('campaignKey', '00'),
+                    ('forceNonLegacySuffix', 'true'),
+                    ('shopId', self.shopId),
+                )
+            getProduct = self.scraper.get(f'https://api-cloud.aboutyou.de/v1/products', params=params)
+            
+            if getProduct:
+                while sizeFound == False:
+                    randomProduct = random.choice(getProduct.json()["entities"])
+                    self.variant = random.choice(randomProduct["variants"])
+                    if self.variant["stock"]["quantity"] > 0:
+                        self.variant = self.variant["id"]
+                        self.id = randomProduct["id"]
+                        sizeFound = True
+                self.scraper.logger.log("Got Dummy")
+                break
+    
+    def addToCart(self):
+        self.scraper.logger.log("Adding Product to Cart")
+        self.scraper.session.headers = OrderedDict([
+            ('host', 'api.aboutyou.com'),
+            ('connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('accept', 'application/json, text/plain, */*'),
+            ('x-auth-token', self.apiToken),
+            ('content-type', 'application/json'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('user-agent', self.user_agent),
+            ('origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        json_data = {
+                "variantId":self.variant,
+                "quantity":1,
+                "customData":{
+                    "variantId":self.variant,
+                    "productId":self.id,
+                    "sponsoredType":"sponsored",
+                    "sortingChannel":None,
+                    "linkedContentType":None,
+                    "linkedContentId":None,
+                    "originDevice":"mobile"
+                },
+                "shopId":self.shopId
+            }
+
+        while True:
+            add = self.scraper.post(f"https://api.aboutyou.com/user/me/basket/bapi?with=items.product.attributes,items.product.variants,items.product.images.attributes:legacy(false),items.product.priceRange,items.variant.attributes&shopId={self.shopId}&sId={self.apiToken}", json=json_data)
+            if add and add != "Captcha":
+                if add.json()["items"][0]["quantity"] == 1:
+                    self.titelbar("carts")
+                    self.scraper.logger.success("Added to Cart")
+                    break
+                else:
+                    self.scraper.logger.error("Error adding to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {add.json()}")
+                    time.sleep(getRetryDelay())
+            elif add == "Captcha":
+                self.scraper.logger.magenta("Getting Captcha")
+                while True:
+                    try:
+                        token = helheim.turnstile(self.scraper, f'https://www.aboutyou.{self.countryCode}/', "0x4AAAAAAAAjQZs3okJpHXao")
+                        if token:
+                            self.scraper.session.headers['x-captcha-code'] = token
+                            break
+                        else:
+                            self.scraper.logger.error("Captcha Error")
+                            time.sleep(getRetryDelay())
+                    except Exception as e:
+                        self.scraper.logger.error("Captcha Error")
+                        time.sleep(getRetryDelay())
+
+    def loadCheckout(self):
+        self.scraper.session.headers = OrderedDict([
+            ('host', f'checkout.aboutyou.{self.countryCode}'),
+            ('connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('sec-ch-ua-mobile', '?0'),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('user-agent', self.user_agent),
+            ('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'),
+            ('sec-fetch-site', 'cross-site'),
+            ('sec-fetch-mode', 'cors'),
+            ('sec-fetch-dest', 'empty'),
+            ('referer', f'https://www.aboutyou.{self.countryCode}/'),
+            ('accept-encoding', 'gzip, deflate, br'),
+            ('accept-language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        self.scraper.logger.log("Getting Checkout")
+        while True:
+            getSession = self.scraper.get(f"https://checkout.aboutyou.{self.countryCode}/api/session/{self.checkoutSid}")
+            if getSession: break
+        self.scraper.session.headers = OrderedDict([
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('x-grpc-web', '1'),
+            ('content-type', 'application/grpc-web+proto'),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.ua_platform}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://www.aboutyou.{self.countryCode}/cart'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        data = self.payloadGen.checkoutUrl(eyCookie=self.checkoutSid,apiToken=self.apiToken,Token=self.token+"0")
+        while True:
+            getCheckoutUrl = self.scraper.post("https://grips-web.aboutyou.com/checkout.CheckoutV1/getCheckoutUrl", data=data)
+            if getCheckoutUrl:
+                try:
+                    self.checkoutUrl = re.findall('(?:(?:https?|ftp):\/\/)?[\w/\-?=%.]+\.[\w/\-&?=%.]+', getCheckoutUrl.text)[0]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"Error getting CheckoutURL - {e}",log_message=f"{str(self.scraper.module).strip().lower()} | CheckoutURL: {getCheckoutUrl.status_code}")
+                    time.sleep(getRetryDelay())
+        while True:
+            getCheckout = self.scraper.get(self.checkoutUrl)
+            if getCheckout:
+                break
+        self.scraper.session.headers = OrderedDict([
+            ('sec-ch-ua', self.chrome_sec_ch_ua),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('sec-ch-ua-platform', f'{self.user_agent}'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://www.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'cross-site'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout-v3.aboutyou.{self.countryCode}/order/data/billing-address'),
+            ('Accept-Language', 'de,de-DE;q=0.9,en-US;q=0.8,en;q=0.7')
+        ])
+        while True:
+            getCheckoutUrl = self.scraper.get(f"https://checkout-v3.aboutyou.{self.countryCode}/api/co/v3/state/config")
+            if getCheckoutUrl:
+                
+                try:
+                    self.secret = getCheckoutUrl.json()["session"]["jwtSecret"]
+                    break
+                except:
+                    self.scraper.logger.error(f"Error getting Checkout token",log_message=f"{str(self.scraper.module).strip().lower()} | CheckoutSecret: {getCheckoutUrl.status_code}")
+                    time.sleep(getRetryDelay())
+        
+        self.scraper.logger.log("Got Checkout")
+
+    def shipping(self):
+        shipping = {
+            "gender":"m",
+            "firstName":self.firstname,
+            "lastName":self.lastname,
+            "streetHouseNumber":f"{self.address1} {self.housenumber}",
+            "additional":f"{self.address2}",
+            "zipCode":self.postalcode,
+            "city":self.city,
+            "countryCode":str(self.countryCode).upper(),
+            "forwardToCollectionPoint":False
+        }
+
+        signature = jwt.encode(
+            {"qry":"3ce1b0e86a96ea57f072abfaf957a784","dta":""},
+            self.secret,
+            algorithm="HS256",
+            headers={"alg":"HS256","typ":"JWT"},
+            )
+
+        self.scraper.headers = OrderedDict([
+            ('Host', f'checkout.aboutyou.{self.countryCode}'),
+            ('Connection', 'keep-alive'),
+            ('sec-ch-ua', self.ua_platform),
+            ('X-SIGNATURE', signature),
+            ('sec-ch-ua-mobile', '?0'),
+            ('User-Agent', self.user_agent),
+            ('Content-Type', 'application/json'),
+            ('X-BROWSER-TAB-ID', "f5824982c25e2c83a463e1cbeb7db236"),
+            ('X-SOURCE', 'order-confirmation'),
+            ('X-DEVICE', 'desktop'),
+            ('sec-ch-ua-platform', '"macOS"'),
+            ('Accept', '*/*'),
+            ('Origin', f'https://checkout.aboutyou.{self.countryCode}'),
+            ('Sec-Fetch-Site', 'same-origin'),
+            ('Sec-Fetch-Mode', 'cors'),
+            ('Sec-Fetch-Dest', 'empty'),
+            ('Referer', f'https://checkout.aboutyou.{self.countryCode}/order/confirmation'),
+            ('Accept-Encoding', 'gzip, deflate, br'),
+            ('Accept-Language', 'de-DE,de;q=0.9')
+        ])
+        self.scraper.logger.log("Submitting shipping")
+        while True:
+            if self.scraper.post(f"https://checkout-v3.aboutyou.{self.countryCode}/api/address/shipping?addressOption=sameAsBilling", json=shipping):break

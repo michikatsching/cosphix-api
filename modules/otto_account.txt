@@ -1,0 +1,314 @@
+import traceback
+from random import randint
+import lxml.html
+try:
+    from src.functions.create_session import *
+except ImportError: 
+    from src.functions.create_session import *
+
+
+try:
+    from src.functions.settings import *
+except ImportError: 
+    from functions.settings import *
+try:
+    from src.functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden","switch":True},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+
+class OTTOACCGEN():
+    def __init__(self,data):
+        try:
+            self.titelbar = MODULETITEL({"store":"Otto Account Generator","values": ["Task(s)","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.profile_name = data["PROFILE"]
+            self.email = data["EMAIL"]
+            self.first_name = data["FIRSTNAME"]
+            self.last_name = data["LASTNAME"]
+            self.address_1 = data["STREET_1"]
+            self.address_2 = data["STREET_2"]
+            self.zip_code = data["ZIPCODE"]
+            self.housenumber = data["HOUSENUMBER"]
+            self.city = data["CITY"]
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            self.country_iso = data["COUNTRY_ISO"]
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            self.discordID = data["discordid"]
+            
+            if any(s == "" for s in [self.country,self.phone_number,self.city,self.housenumber,self.zip_code,self.address_1,self.last_name,self.first_name,self.email]):
+                print("Make sure everything needed is filled.")
+                sys.exit()
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module="OTTO",taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = self.scraper.user_agent
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            self.scraper.set_proxy()
+            self.scraper.logger.warn("Starting Task")
+                
+            self.createAccount()
+            self.submittAddress()
+            sleep(15)
+            sys.exit()
+        except Exception as e:
+            print(f"Profile error - {e}")
+            self.titelbar("-Task(s)")
+            sleep(15)
+            sys.exit()
+
+    def injection(self, session : CREATE_SESSION, response :requests.Response):
+        
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+
+
+    def createAccount(self):
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?1',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            response = self.scraper.get('https://www.otto.de/customer-registration/lightweightCustomerAccount',  headers=headers)
+            if response:
+                try:
+                    self.csrf = response.text.split('input type="hidden" name="_csrf" value="')[1].split('"')[0]
+                    break
+                except:
+                    self.scraper.logger.error(f"Error getting Login Page")
+                    sleep(getRetryDelay())
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': '"Google Chrome";v="105", "Not)A;Brand";v="8", "Chromium";v="105"',
+            'sec-ch-ua-mobile': '?1',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform': '"Android"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36',
+        }
+        self.scraper.logger.log("Creating Account")
+        
+        while True:
+            self.password = generatePassword()
+            post = self.scraper.post('https://www.otto.de/customer-registration/lightweightCustomerAccount',headers=headers,data={
+                '_csrf': self.csrf,
+                'salutation': 'MISTER',
+                'firstName': self.first_name,
+                'lastName': self.last_name,
+                'email': self.email,
+                'password': self.password,
+                'passwordRepeat': self.password,
+                '_newsletter': 'on',
+            })
+            
+            if post:
+                if post.url == "https://www.otto.de/":
+                    self.scraper.logger.log("Created Account")
+                    break
+                elif post.url == "https://www.otto.de/customer-registration/lightweightEmailInUse":
+                    self.scraper.logger.error("Email already in Use")
+                    sys.exit()
+                else:
+                    self.scraper.logger.error("Unhandled Error")
+                    sleep(getRetryDelay())
+    
+    def submittAddress(self):
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': '"Google Chrome";v="105", "Not)A;Brand";v="8", "Chromium";v="105"',
+            'sec-ch-ua-mobile': '?1',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform': '"Android"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36',
+        }
+        self.scraper.logger.log("Submitting Address")
+        while True:
+            csrfget = self.scraper.get("https://www.otto.de/user/completeCustomerData",headers=headers)
+            if csrfget:
+                if "Meine persÃ¶nlichen Angaben" in csrfget.text:
+                    break
+                else:
+                    self.scraper.logger.error("Erro submitting Address")
+                    sleep(getRetryDelay())
+    
+        
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'origin': 'https://www.otto.de',
+            'referer': 'https://www.otto.de/user/completeCustomerData',
+            'sec-ch-ua': '"Google Chrome";v="107", "Chromium";v="107", "Not=A?Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36',
+        }
+        while True:
+            submit = self.scraper.post('https://www.otto.de/user/expertLogin/completeCustomerDataForProspect',headers=headers,data={
+                    'address.street': self.address_1,
+                    'address.houseNumber': self.housenumber,
+                    'address.addOn': self.address_2,
+                    'address.postalCode': self.zip_code,
+                    'address.city': self.city,
+                    'address.areaCode': '0171',
+                    'address.phoneNumber': self.phone_number[3:],
+                    'phoneNumberOptional': 'false',
+                    'birthday.day': str(random.randint(1,28)),
+                    'birthday.month': str(random.randint(1,12)),
+                    'birthday.year': str(random.randint(1980,2001)),
+                    'userOrigin': 'DEFAULT',
+                    'privacyOptIn': 'on',
+                    'deviceType': 'desktop',
+                    'operatingSystem': 'Windows 10',
+                })
+           
+            if submit:
+                if submit.url == "https://www.otto.de/myaccount/dashboard":
+                    self.scraper.logger.success("Created Account!")
+                    self.titelbar("success")
+                    save_account(["OTTO",self.email,self.password])
+                    sys.exit()
+                elif "user/login" in submit.url:
+                    self.login()
+                    continue
+                
+                else:
+                    self.scraper.logger.error("Failed!")
+                    self.titelbar("failed")
+                    break
+            else:
+                self.scraper.logger.error("Failed!")
+                self.titelbar("failed")
+                break
+    
+    def login(self):
+        headers = {
+            'authority': 'www.otto.de',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?1',
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            response = self.scraper.get('https://www.otto.de/customer-identity/login', headers=headers)
+            if response:
+                try:
+                    csrf = lxml.html.fromstring(response.content).xpath("//input[@name='_csrf']")[0].attrib['value']
+                    challangeValue = response.text.split('data-qa="fti-login-challenge-value"')[1].split('data-value="')[1].split('"')[0]
+                    break
+                except Exception as e:
+                    self.scraper.logger.error(f"GetLogin : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | GetLogin: {traceback.format_exc()}")
+                    time.sleep(getRetryDelay())
+        
+        self.scraper.logger.log("Logging in")
+        while True:
+            try:
+                response = self.scraper.post('https://www.otto.de/customer-identity/login',data={
+                    '_csrf': csrf,
+                    'email': self.email,
+                    'password': self.password,
+                    'challengeValue': challangeValue,
+                },params={
+                    'cache': randint(0, 9999)
+                }, headers=headers)
+                if response:
+                    if response.url == "https://www.otto.de/myaccount/dashboard" or "myaccount/dashboard" in response.url:
+                        break
+                    else:
+                        self.scraper.logger.error(f"Login: Wrong Email/Password")
+                        sys.exit()
+
+            except Exception as e:
+                self.scraper.logger.error(f"Login : {e}",log_message=f"{str(self.scraper.module).strip().lower()} | Login: {traceback.format_exc()}")
+                time.sleep(getRetryDelay())
+        self.scraper.logger.log("Logged in")

@@ -1,0 +1,96 @@
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from src.functions.settings import *
+except ImportError: 
+    from functions.settings import *
+try:
+    from src.functions.log import *
+except ImportError: 
+    from functions.log import *
+try:
+    from src.functions.captcha import *
+except ImportError: 
+    from functions.captcha import *
+
+import flask,logging,click
+
+class KITHEU():
+    def __init__(self):
+        clearTerminal()
+        self.titelbar = MODULETITEL({"store":"KithEU Captcha Harvester","values": ["Task(s)","Captcha Tokens"]}).status_bar
+        
+        self.logger = Logger("KithEU Preharvester")
+        self.logger.setTimedelta(timedelta(hours= 2))
+        self.tokens = []
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        def secho(text, file=None, nl=None, err=None, color=None, **styles):
+            pass
+
+        def echo(text, file=None, nl=None, err=None, color=None, **styles):
+            pass
+        click.echo = echo
+        click.secho = secho
+        while True:
+            try:
+                number = int(input("How many Prehavrester do you want to start?"))
+                break
+            except:
+                self.logger.error("Please input a Number!")
+        for i in range(number):
+            self.titelbar("Task(s)")
+            threading.Thread(target=self.getCaptcha).start()
+
+        self.app = flask.Flask(__name__)
+        threading.Thread(target=self.manageTokens).start()
+        self.app.add_url_rule('/token', 'token', self.api_fetch_token)
+        self.app.run(port=8383)
+        while True:
+            pass
+
+    def getCaptcha(self):
+        self.logger.magenta("Getting Captcha")
+        while True:
+            captcha = solvecaptcha({
+                "type":"hcaptcha",
+                "sitekey":"b989d9e8-0d14-41a0-870f-97b5283ba67d",
+                "url":"https://hcaptcha.com/1/api.js"
+            })
+            if captcha["Success"]:
+                self.tokens.append({
+                    'token': captcha["Data"],
+                    'expiry': time.time() + 115
+                })
+                self.titelbar("Captcha Tokens")
+                self.logger.success("Got new Captcha")
+            else:
+                self.logger.error(f"Error while requesting Captcha - {captcha['Error']}")
+                time.sleep(3)
+    
+    def manageTokens(self):
+        while True:
+            for token in self.tokens:
+                if token['expiry'] < time.time():
+                    self.titelbar("-Captcha Tokens")
+                    self.tokens.remove(token)
+                    self.logger.error(f"Removed expired Captcha Token")
+            time.sleep(2)
+
+    def api_fetch_token(self):
+        try:
+            token = self.tokens.pop(0)
+            self.titelbar("-Captcha Tokens")
+            return json.loads(json.dumps({
+                'success': True,
+                'error': None,
+                'response': token['token']
+            }))
+        except Exception as e:
+            return json.loads(json.dumps({
+                'success': False,
+                'error': 'Token requested but none available',
+                'response': None
+            }))

@@ -1,0 +1,598 @@
+import lxml.html
+try:
+    from ..functions.monitor import *
+except ImportError: 
+    from functions.monitor import *
+
+try:
+    from ..functions.settings import *
+except ImportError: 
+    from functions.settings import *
+
+try:
+    from ..functions.api import *
+except ImportError: 
+    from functions.api import *
+try:
+    from src.functions.programtitle import *
+except ImportError: 
+    from functions.programtitle import *
+try:
+    from src.functions.webhook import *
+except ImportError: 
+    from src.functions.webhook import *
+try:
+    from ..functions.create_session import *
+except ImportError: 
+    from functions.create_session import *
+try:
+    from ..functions.constants import *
+except ImportError: 
+    from functions.constants import *
+
+
+
+URL = ""
+apitasks = []
+
+
+status_codes = {
+    400: {"text":"400 Bad Request","switch":False},
+    403: {"text":"403 Forbidden / Cequence block","switch":True},
+    404: {"text":"404 Not Found","switch":False},
+    409: {"text":"409 Conflict","switch":True},
+    429: {"text":"429 Too Many Requests","switch":True},
+}
+
+class MESHFE():
+    def __init__(self,data):
+        try:
+            self.store = data["STORE"]
+            self.pid = data["PID"]
+            if "footpatrol" in self.store:
+                self.store = "Footpatrol"
+                self.url = "footpatrol"
+            elif "jd" in self.store:
+                self.store = "JD Sports"
+                self.url = "jdsports"
+            elif "size" in self.store:
+                self.store = "Size?"
+                self.url = "sizeofficial"
+            elif "hip" in self.store:
+                self.store = "HipStore"
+                self.url = "thehipstore"
+            else:
+                print("Store not supported!")
+                sys.exit()
+            try:
+                self.apiKey = meshfe["stores"][f"{self.url}{str(data['COUNTRY_ISO']).lower()}"]
+            except:
+                print("Store not supported!")
+                sys.exit()
+            self.apiKey = "93885D2F498549709C1273569D858123"
+            self.titelbar = MODULETITEL({"store":self.store.upper(),"values": ["Task(s)","Carts","Failed","Success"]}).status_bar
+            self.titelbar("Task(s)")
+            self.tasknumber = data["tasknumber"]
+            proxies = data["proxy"]
+            self.discordID = data["discordid"]
+            self.mode = str(data["MODE"]).lower().strip()
+            if self.mode == "loop":
+                self.loop = True
+            self.loop = False
+            self.payment_method = data["PAYMENT_METHOD"]
+            self.profile_name = data["PROFILE"]
+            self.email = data["EMAIL"]
+            self.firstname = data["FIRSTNAME"]
+            self.lastname = data["LASTNAME"]
+            self.address1 = data["STREET_1"]
+            self.webhook = str(data["WEBHOOK"]).strip()
+            self.address2 = data["STREET_2"]
+            self.postalcode = data["ZIPCODE"]
+            self.housenumber = data["HOUSENUMBER"]
+            self.size = data["SIZE"]
+            self.city = data["CITY"]
+            try:
+                self.profile_webhook = str(data["WEBHOOK"]).strip()
+            except:
+                self.profile_webhook = ""
+            self.phone_number = data["PHONENUMBER"]
+            self.country = data["COUNTRY"]
+            if str(data["COUNTRY_ISO"]).lower() == "gb" or str(data["COUNTRY_ISO"]).lower() == "uk":
+                data["COUNTRY_ISO"] = "co.uk"
+            self.url += f".{str(data['COUNTRY_ISO']).lower()}"
+            
+            self.scraper = CREATE_SESSION(self.injection,mobile=False,proxys=proxies,module=self.store,taskcount=self.tasknumber)
+            self.scraper.create_session()
+            self.user_agent = self.scraper.user_agent
+            self.ua_platform = self.scraper.get_ua_platform(self.user_agent)
+            self.chrome_version = self.scraper.get_chrome_version(self.user_agent)
+            self.chrome_sec_ch_ua = self.scraper.get_chrome_sec_ch_ua(self.chrome_version)
+            if str(self.url).strip().lower() == "api":
+                self.web_socket()
+            self.scraper.set_proxy()
+            self.getproduct()
+            self.addtocart()      
+            self.getCheckout()
+            self.postAddy()
+            self.PayPal() 
+            sys.exit()
+        except Exception as e :
+            print(f"Error - {e}")
+            time.sleep(15)
+            sys.exit()
+            pass
+
+    def injection(self, session : requests.session, response :requests.Response):
+        if helheim.isChallenge(session, response):
+            self.scraper.logger.magenta("Solving Cloudflare")
+            return helheim.solve(session, response)
+        
+        elif "used Cloudflare to restrict access" in response.text:
+            self.scraper.logger.error("IP Temporarily Restricted - switching Proxy")
+            self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+        
+        elif response.status_code in status_codes:
+            self.scraper.logger.error(status_codes[response.status_code]["text"])
+            if status_codes[response.status_code]["switch"]: self.scraper.set_proxy(switch=True)
+            time.sleep(getRetryDelay())
+            return None
+
+        elif str(response.status_code).startswith("5"):
+            self.scraper.logger.error(f"Server Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        elif str(response.status_code).startswith("4"):
+            self.scraper.logger.error(f"Client Error: {str(response.status_code)}")
+            time.sleep(getRetryDelay())
+            return None
+        
+        else:
+            return response
+        
+    def getproduct(self):
+        self.scraper.logger.log("Getting Product")
+        headers = {
+            'authority': f'www.{self.url}',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'max-age=0',
+            'referer': f'https://www.{self.url}/',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': self.user_agent,
+        }
+        while True:
+            try:
+                get = requests.get(f"https://www-{self.url.split('.')[0]}-{self.url.split('.')[1]}.translate.goog/product/{''.join(random.choice(string.ascii_letters) for x in range(10))}/{self.pid}/stock?_x_tr_sl=auto&_x_tr_tl=de&_x_tr_hl=de&_x_tr_pto=wapp",headers=headers)
+                if get.status_code == 200:
+                    doc = lxml.html.fromstring(get.text)
+                    self.productSizes = []
+                    for size in doc.xpath("//button[@data-e2e='pdp-productDetails-size']"):
+                        self.productSizes.append({
+                            "name":size.attrib['data-size'],
+                            "page_id_variant":size.attrib['data-sku']
+                        })
+                    self.scraper.logger.success("Got Product")
+                    break
+                else:
+                    self.scraper.logger.error("Error getting Product",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {get.status_code}")
+                    time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error("Error getting Product",log_message=f"{str(self.scraper.module).strip().lower()} | GetProduct: {e}")
+                time.sleep(getRetryDelay())
+
+    def addtocart(self):
+        self.scraper.logger.log("Adding to Cart")
+        headers = {
+            'Host': f'www.{self.url}',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'accept': '*/*',
+            'content-type': 'application/json',
+            'x-requested-with': 'XMLHttpRequest',
+            'sec-ch-ua-mobile': '?0',
+            'user-agent': self.user_agent,
+            'sec-ch-ua-platform': self.ua_platform,
+            'origin': f'https://www.{self.url}',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': f'https://www.{self.url}/product/{"".join(random.choice(string.ascii_letters) for x in range(10))}/{self.pid}/?invalidateCache=True',
+            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        while True:
+            rc = random.choice(self.productSizes)
+            
+            self.productSize = rc["name"]
+            self.sizepid = rc["page_id_variant"]
+            try:
+                post = self.scraper.post(f"https://www.{self.url}/cart/{self.sizepid}/",headers=headers,json={"customisations":False,"cartPosition":None,"recaptchaResponse":False,"cartProductNotification":None,"quantityToAdd":1})
+                if post:  
+                    self.cartID = post.json()["ID"]
+                    self.productName = post.json()["contents"][0]["name"]
+                    self.productPic = post.json()["contents"][0]["image"]["originalURL"]
+                    self.productPrice = post.json()["contents"][0]["unitPrice"]["amount"]
+                    self.productPrice += " £" if post.json()["contents"][0]["unitPrice"]["currency"] == "GBP" else " €"
+                    self.scraper.logger.success("Added to Cart")
+                    break
+            except Exception as e:
+                self.scraper.logger.error("Error adding Product to Cart",log_message=f"{str(self.scraper.module).strip().lower()} | ATC: {e}")
+                time.sleep(getRetryDelay())
+    
+
+    def getCheckout(self):
+        self.scraper.logger.log("Getting Checkout")
+        headers = {
+            'Host': 'prod.jdgroupmesh.cloud',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'user-agent': self.user_agent,
+            'content-type': 'application/json;charset=UTF-8',
+            'accept': 'application/json, text/plain, */*',
+            'x-api-channel': 'desktop',
+            'x-api-key': self.apiKey,
+            'sec-ch-ua-platform': self.ua_platform,
+            'origin': f'https://checkout.{self.url}',
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': f'https://checkout.{self.url}/',
+            'accept-language': 'de-DE,de;q=0.9',
+        }
+        params = {
+            'api_key': self.apiKey,
+        }
+        json_data = {
+            'email': self.email,
+            'password': '',
+            'firstName': '',
+            'lastName': '',
+            'isGuest': True,
+            'enrolledForEmailMarketing': True,
+            'enrolledForSMSMarketing': False,
+            'enrolledForPostageMarketing': False,
+            'enrolledForThirdPartyMarketing': False,
+        }
+        while True:
+            try:
+                post = self.scraper.post(f'https://prod.jdgroupmesh.cloud/stores/{self.url.replace(".","").replace("official","")}/customers',params=params,headers=headers,json=json_data)
+                if post:
+                    try:
+                        self.customerID = post.json()["ID"]
+                        self.scraper.logger.log("Got Checkout")
+                        break
+                    except:
+                        self.scraper.logger.error("Error getting Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | Checkout: {post.text}")
+                        time.sleep(getRetryDelay())
+            except Exception as e:
+                self.scraper.logger.error("Error getting Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | Checkout: {e}")
+                time.sleep(getRetryDelay())
+
+    def postAddy(self):
+        self.scraper.logger.log("Submitting Address")
+        headers = {
+            'Host': 'prod.jdgroupmesh.cloud',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'user-agent': self.user_agent,
+            'content-type': 'application/json;charset=UTF-8',
+            'accept': 'application/json, text/plain, */*',
+            'x-api-channel': 'desktop',
+            'x-api-key': self.apiKey,
+            'sec-ch-ua-platform': self.ua_platform,
+            'origin': f'https://checkout.{self.url}',
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': f'https://checkout.{self.url}/',
+            'accept-language': 'de-DE,de;q=0.9',
+        }
+        params = {
+            'api_key': self.apiKey,
+            'locale': self.url.split(".")[1],
+            'channel': 'desktop',
+            'excludeCAndCAddress': '1',
+        }
+        json_data = {
+            'firstName': self.firstname,
+            'lastName': self.lastname,
+            'phone': "15222740576",#self.phone_number,
+            'address1': self.address1,
+            'address2': self.address2,
+            'town': self.city,
+            'county': self.country,
+            'postcode': self.postalcode,
+            'title': '',
+            'country': self.country,
+            'locale': self.url.split(".")[1],
+            'isPrimaryBillingAddress': True,
+            'isPrimaryAddress': True,
+            'isCAndC': False,
+        }
+        while True:
+            try:
+                post = self.scraper.post(f'https://prod.jdgroupmesh.cloud/stores/{self.url.replace(".","").replace("official","")}/customers/{self.customerID}/addresses',params=params,headers=headers,json=json_data)
+                if post:
+                    
+                    if post.json()["firstName"] == self.firstname:
+                        self.scraper.logger.success("Submitted Address")
+                        self.addressID = post.headers["Location"]
+                        break
+                    
+                    self.scraper.logger.error(f"Error submitting Address",log_message=f"{str(self.scraper.module).strip().lower()} | Address: {post.text}")
+                    time.sleep(getRetryDelay())
+
+            except Exception as e:
+                self.scraper.logger.error("Error submitting Address",log_message=f"{str(self.scraper.module).strip().lower()} | Address: {e}")
+                time.sleep(getRetryDelay())
+
+
+        self.scraper.logger.log("Getting Delivery methods")
+        params = {
+            'api_key': self.apiKey,
+            'q': self.postalcode,
+            'excludeCandC': '1',
+            'channel': 'desktop',
+            'deliveryLocale': self.url.split(".")[1],
+        }
+         
+        while True:
+            try:    
+                get  = self.scraper.get(f'https://prod.jdgroupmesh.cloud/stores/{self.url.replace(".","").replace("official","")}/carts/{self.cartID}/deliveryOptionsForProposedAddress',params=params,headers=headers)
+                if get:
+                    self.deliveryID = get.json()["deliveryMethods"][0]["links"][0]["body"]["delivery"]["deliveryMethodID"]
+                    self.scraper.logger.log("Got Delivery method")
+                    break
+            except Exception as e:
+                self.scraper.logger.error("Error GDM",log_message=f"{str(self.scraper.module).strip().lower()} | GDM: {e}")
+                time.sleep(getRetryDelay())
+
+        self.scraper.logger.log("Submitting Delivery method")
+        params = {
+            'api_key': self.apiKey,
+            'channel': 'desktop',
+            'unavailableForGiftCardStatus': '1',
+            'locale': self.url.split(".")[1],
+            'debug': '1',
+            'proposedDeliveryLocale': self.url.split(".")[1],
+        }
+        json_data = {
+            'delivery': {
+                'deliveryMethodID': self.deliveryID,
+            },
+            'proposedDeliveryLocale': self.url.split(".")[1],
+        }
+        while True:
+            try:
+                put = self.scraper.put(f'https://prod.jdgroupmesh.cloud/stores/{self.url.replace(".","").replace("official","")}/carts/{self.cartID}',params=params,headers=headers,json=json_data)
+                if put:
+                    if put.json()["delivery"]["deliveryMethodID"] == self.deliveryID:
+                        self.scraper.logger.log("Submitted Delivery method")
+                        break
+                    self.scraper.logger.error("Error SDM",log_message=f"{str(self.scraper.module).strip().lower()} | SDM: {put.text}")
+                    time.sleep(getRetryDelay())
+
+            except Exception as e:
+                self.scraper.logger.error("Error SDM",log_message=f"{str(self.scraper.module).strip().lower()} | SDM: {e}")
+                time.sleep(getRetryDelay())
+
+
+        json_data = {
+            'customer': {
+                'id': f'https://prod.jdgroupmesh.cloud/customers/{self.customerID}',
+            },
+            'billingAddress': {
+                'id': f'https://prod.jdgroupmesh.cloud/addresses/{self.addressID}',
+            },
+            'deliveryAddress': {
+                'id': f'https://prod.jdgroupmesh.cloud/addresses/{self.addressID}',
+            },
+        }
+        
+        while True:
+            try:
+                put = self.scraper.put(f'https://prod.jdgroupmesh.cloud/stores/{self.url.replace(".","").replace("official","")}/carts/{self.cartID}',params=params,headers=headers,json=json_data)
+                if put:
+                    try:
+                        self.totalAmount = put.json()["total"]["amount"]
+                        self.currency = put.json()["total"]["currency"]
+                        self.sizePID = put.json()["contents"][0]["SKU"]
+                        self.deliveryPrice = put.json()["deliverySubtotal"]["amount"]
+                        self.totalRaw = put.json()["rawCartTotal"]["amount"]
+                        break
+                    except:
+
+                        self.scraper.logger.error("Error SDM2",log_message=f"{str(self.scraper.module).strip().lower()} | SDM2: {put.text}")
+                        time.sleep(getRetryDelay())
+
+            except Exception as e:
+                self.scraper.logger.error("Error SDM2",log_message=f"{str(self.scraper.module).strip().lower()} | SDM2: {e}")
+                time.sleep(getRetryDelay())
+
+    def PayPal(self):
+        self.scraper.logger.log("Submitting Checkout")
+        headers = {
+            'authority': 'paymentservice.eks.jdgroupmesh.cloud',
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'de-DE,de;q=0.9',
+            'channel': 'desktop',
+            'content-type': 'application/json',
+            'origin': f'https://checkout.{self.url}',
+            'referer': f'https://checkout.{self.url}/',
+            'sec-ch-ua': self.chrome_sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': self.ua_platform,
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'cross-site',
+            'user-agent': self.user_agent,
+        }
+        json_data = {
+            'provider': 'adyen',
+            'method': 'paypal',
+            'merchantReference': '',
+            'type': 'Init',
+            'cart': {
+                'ID': self.cartID,
+                'currency': self.currency,
+                'balanceToPay': {
+                    'amount': self.totalAmount,
+                    'currency': self.currency,
+                },
+                'customer': {
+                    'ID': self.customerID,
+                    'clientID': self.customerID,
+                    'email': self.email,
+                    'title': '',
+                    'firstName': self.firstname,
+                    'lastName': self.lastname,
+                    'phone': self.phone_number,
+                    'mobile': '',
+                    'preferredContactMethod': '',
+                    'isGuest': True,
+                },
+                'billingAddress': {
+                    'ID': self.addressID,
+                    'title': '',
+                    'firstName': self.firstname,
+                    'lastName': self.lastname,
+                    'phone': self.phone_number,
+                    'mobile': self.phone_number,
+                    'address1': self.address1,
+                    'address2': self.address2,
+                    'town': self.city,
+                    'county': '',
+                    'country': self.country,
+                    'postcode': self.postalcode,
+                    'locale': self.url.split(".")[1],
+                    'coordinates': {
+                        'latitude': 0,
+                        'longitude': 0,
+                    },
+                },
+                'shippingAddress': {
+                    'ID': self.addressID,
+                    'title': '',
+                    'firstName': self.firstname,
+                    'lastName': self.lastname,
+                    'phone': self.phone_number,
+                    'mobile': self.phone_number,
+                    'address1': self.address1,
+                    'address2': self.address2,
+                    'town': self.city,
+                    'county': '',
+                    'country': self.country,
+                    'postcode': self.postalcode,
+                    'locale': self.url.split(".")[1],
+                    'coordinates': {
+                        'latitude': 0,
+                        'longitude': 0,
+                    },
+                },
+                'lines': [
+                    {
+                        'ID': self.sizePID,
+                        'itemID': self.sizePID,
+                        'name': self.productName,
+                        'quantity': 1,
+                        'unitPrice': {
+                            'amount': self.totalRaw,
+                            'currency': self.currency,
+                        },
+                        'discountAmount': [
+                            {
+                                'type': '',
+                                'name': '',
+                                'amount': {
+                                    'amount': '0.00',
+                                    'currency': self.currency,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                'deliveryMethod': {
+                    'ID': self.deliveryID,
+                    'amount': {
+                        'amount': self.deliveryPrice,
+                        'currency': self.currency,
+                    },
+                    'displayName': 'Standardlieferung',
+                    'description': 'Kostenloser Versand ab 100€ oder Standardversand für 3.99€. Versand innerhalb von 3-7 Werktagen.',
+                },
+                'locale': 'DE',
+                'deductions': [],
+            },
+            'initPayload': '{"amount":{"currency":"EUR","value":'+str(self.totalAmount).replace(".","")+'},"reference":"","paymentMethod":{"type":"paypal","subtype":"sdk"},"returnUrl":"https://checkout.'+self.url+'/paymentredirect/paypal?store='+self.url.replace(".","").replace("official","")+'","merchantAccount":"JD_Germany","telephoneNumber":"'+self.phone_number+'","lineItems":[{"description":"'+self.productName+'","quantity":"1","amountIncludingTax":'+str(self.totalRaw).replace(".","")+',"id":"'+self.sizePID+'","imageUrl":"'+self.productPic+'"}]}',
+        }
+        if self.loop:
+            self.loops = 1
+        while True:
+            response = self.scraper.post(
+                f'https://paymentservice.eks.jdgroupmesh.cloud/v1/{self.url.replace(".","").replace("official","")}/gateway/adyen/method/paypal/initPayment',
+                headers=headers,
+                json=json_data,
+            )
+            if response:
+                try:
+                    if self.loop:
+                        webhook_public({
+                            "Store":f"||{self.store} {self.url.split('.')[1].upper()} Frontend||",
+                            "Product":f"{self.productName}",
+                            "Size":f"{self.productSize}",
+                            "Price":f"{self.productPrice}",
+                            "Payment Method":"PayPal",
+                            "Mode":"Loop",
+                            "Task Input": self.pid}
+                            ,img=self.productPic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=meshfe&url={self.sizePID})")
+                        webhook_private({
+                            "Store":f"||{self.store} {self.url.split('.')[1].upper()} Frontend||",
+                            "Product":f"{self.productName}",
+                            "Size":f"{self.productSize}",
+                            "Price":f"{self.productPrice}",
+                            "Payment Method":"PayPal",
+                            "Mode":"Loop",
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.productPic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper.session,json.loads(response.json()["rawResponse"])["action"]["url"]),product_url=self.sizePID)
+                        if self.loops == 5:
+                            self.scraper.logger.magenta(f"Successfully checked out! - Max loops reached, stopping task")
+                            sys.exit()
+                        self.scraper.logger.magenta(f"Successfully checked out! - Loop: {self.loops}")
+                        self.loops += 1
+                        
+
+                    else:
+                        webhook_public({
+                            "Store":f"||{self.store} {self.url.split('.')[1].upper()} Frontend||",
+                            "Product":f"{self.productName}",
+                            "Size":f"{self.productSize}",
+                            "Price":f"{self.productPrice}",
+                            "Payment Method":"PayPal",
+                            "Mode":"Normal",
+                            "Task Input": self.pid}
+                            ,img=self.productPic,description=f"[Click here to start QuickTasks](http://cosphix.com/quicktask?store=meshfe&url={self.sizePID})")
+                        webhook_private({
+                            "Store":f"||{self.store} {self.url.split('.')[1].upper()} Frontend||",
+                            "Product":f"{self.productName}",
+                            "Size":f"{self.productSize}",
+                            "Price":f"{self.productPrice}",
+                            "Payment Method":"PayPal",
+                            "Mode":"Normal",
+                            "Retry Delay / Monitor Delay":f"||{getRetryDelay()} / {getMonitorDelay()}||",
+                            "Checkout Email / Profile":f"||{self.email} / {self.profile_name}||",
+                            "discordid":self.discordID
+                            },img=self.productPic,success=True,profile_webhook=self.profile_webhook,url=generateUrl(self.scraper.session,json.loads(response.json()["rawResponse"])["action"]["url"]),product_url=self.sizePID)
+                        self.scraper.logger.success("Successfully checked out!")
+                        sys.exit()
+                except Exception as e:
+                    self.scraper.logger.error("Error Submitting Checkout",log_message=f"{str(self.scraper.module).strip().lower()} | SC: {e}")
+                    time.sleep(getRetryDelay())
